@@ -1,7 +1,7 @@
 # pylint: disable=bare-except,global-statement
 
 """
-Main module serving the pages for the bunq2IFTTT appengine app
+Main module serving the pages for the IFTTT2YNAB appengine app
 """
 
 import base64
@@ -64,6 +64,18 @@ def ifttt_test_setup():
                         "approved": "x",
                         "flag_color": "x",
                         "import_id" : "x",
+                    },
+                    "ynab_adjust_balance": {
+                        "budget": "TEST#TEST#1",
+                        "account": "x",
+                        "date": "x",
+                        "new_balance": "x",
+                        "payee": "x",
+                        "category": "x",
+                        "memo": "x",
+                        "cleared": "x",
+                        "approved": "x",
+                        "flag_color": "x",
                     }
                 },
                 "actionRecordSkipping": {
@@ -79,6 +91,18 @@ def ifttt_test_setup():
                         "approved": "x",
                         "flag_color": "x",
                         "import_id" : "x",
+                    },
+                    "ynab_adjust_balance": {
+                        "budget": "TEST#TEST#2",
+                        "account": "x",
+                        "date": "x",
+                        "new_balance": "x",
+                        "payee": "x",
+                        "category": "x",
+                        "memo": "x",
+                        "cleared": "x",
+                        "approved": "x",
+                        "flag_color": "x",
                     }
                 }
             }
@@ -86,6 +110,8 @@ def ifttt_test_setup():
     })
 
 @app.route("/ifttt/v1/actions/ynab_create/fields/budget/options",
+           methods=["POST"])
+@app.route("/ifttt/v1/actions/ynab_adjust_balance/fields/budget/options",
            methods=["POST"])
 def ifttt_budget_options():
     """ Option values for the budget field """
@@ -162,7 +188,7 @@ def ifttt_create_action():
                 if c["name"] == category:
                     category_id = c["id"]
         if category_id is None:
-            print("[create_action] WARNING: category not found, ignoring")
+            print("[create_action] WARNING: unknown category, ignored")
 
     try:
         date = arrow.get(fields["date"]).format("YYYY-MM-DD")
@@ -199,6 +225,117 @@ def ifttt_create_action():
         body["transaction"]["flag_color"] = fields["flag_color"]
     if fields["import_id"] != "":
         body["transaction"]["import_id"] = fields["import_id"]
+
+    print(json.dumps(body))
+    r = requests.post(YNAB_BASE + "/budgets/{}/transactions".format(budget), \
+        headers={"Authorization": "Bearer {}".format(get_ynab_key())}, \
+        json=body)
+    print(r.status_code, r.text)
+    if r.status_code > 299:
+        try:
+            msg = "{} Bad request".format(r.status_code)
+            msg = r.json()["error"]["detail"]
+        except:
+            pass
+        return json.dumps({"errors": [{"status": "SKIP",
+                                       "message": msg}]}), 400
+
+    return json.dumps({"data": [{"id": uuid.uuid4().hex}]})
+
+@app.route("/ifttt/v1/actions/ynab_adjust_balance", methods=["POST"])
+def ifttt_adjust_balance_action():
+    """ Main endpoint to adjust a balance of an account in YNAB """
+    if "IFTTT-Service-Key" not in request.headers or \
+            request.headers["IFTTT-Service-Key"] != get_ifttt_key():
+        print("[adjust_balance_action] ERROR: invalid service key!")
+        return json.dumps({"errors": [{"message": "Invalid key"}]}), 401
+    data = request.get_json()
+    if "actionFields" not in data:
+        print("[adjust_balance_action] ERROR: missing actionFields")
+        return json.dumps({"errors": [{"status": "SKIP", \
+            "message": "Invalid data: actionFields missing"}]}), 400
+    fields = data["actionFields"]
+    for x in ["budget", "account", "date", "new_balance", "payee", "category",
+              "memo", "cleared", "approved", "flag_color"]:
+        if x not in fields:
+            print("[adjust_balance_action] ERROR: missing field: "+x)
+            return json.dumps({"errors": [{"status": "SKIP", \
+                "message": "Invalid data: missing field: "+x}]}), 400
+
+    budget = fields["budget"]
+    if budget == "TEST#TEST#1":
+        return json.dumps({"data": [{"id": uuid.uuid4().hex}]})
+    if budget == "TEST#TEST#2":
+        return json.dumps({"errors": [{"status": "SKIP",
+                                       "message": "Test"}]}), 400
+    if len(str(budget)) != 36:
+        print("[adjust_balance_action] ERROR: incorrect budget (no uuid): "\
+              +budget)
+        return json.dumps({"errors": [{"status": "SKIP", \
+            "message": "Invalid data: incorrect budget: "+budget}]}), 400
+
+    account = fields["account"]
+    r = requests.get(YNAB_BASE + "/budgets/{}/accounts".format(budget), \
+        headers={"Authorization": "Bearer {}".format(get_ynab_key())})
+    results = r.json()["data"]["accounts"]
+    account_id = None
+    for a in results:
+        if a["name"] == account:
+            account_id = a["id"]
+            old_balance = a["balance"]
+    if account_id is None:
+        print("[adjust_balance_action] ERROR: account not found")
+        return json.dumps({"errors": [{"status": "SKIP",
+                                       "message": "Account not found"}]}), 400
+
+    category = fields["category"]
+    category_id = None
+    if category != "":
+        r = requests.get(YNAB_BASE + "/budgets/{}/categories".format(budget), \
+            headers={"Authorization": "Bearer {}".format(get_ynab_key())})
+        results = r.json()["data"]["category_groups"]
+        for g in results:
+            for c in g["categories"]:
+                if c["name"] == category:
+                    category_id = c["id"]
+        if category_id is None:
+            print("[adjust_balance_action] WARNING: unknown category, ignored")
+
+    try:
+        date = arrow.get(fields["date"]).format("YYYY-MM-DD")
+    except:
+        print("[adjust_balance_action] ERROR: invalid date: "+fields["date"])
+        return json.dumps({"errors": [{"status": "SKIP",
+                                       "message": "Invalid date"}]}), 400
+
+    try:
+        new_balance = int(float(fields["new_balance"])*1000)
+        amount = new_balance - old_balance
+    except:
+        print("[adjust_balance_action] ERROR: invalid amount: "+\
+              fields["new_balance"])
+        return json.dumps({"errors": [{"status": "SKIP",
+                                       "message": "Invalid amount"}]}), 400
+
+    body = {"transaction": {
+        "account_id": account_id,
+        "date": date,
+        "amount": amount,
+    }}
+    if fields["payee"] != "":
+        body["transaction"]["payee_name"] = fields["payee"][:50]
+    if category_id is not None:
+        body["transaction"]["category_id"] = category_id
+    if fields["memo"] != "":
+        body["transaction"]["memo"] = fields["memo"][:200]
+    if fields["cleared"] != "":
+        body["transaction"]["cleared"] = fields["cleared"]
+    if fields["approved"] == "true":
+        body["transaction"]["approved"] = True
+    else:
+        body["transaction"]["approved"] = False
+    if fields["flag_color"] not in ["", "none"]:
+        body["transaction"]["flag_color"] = fields["flag_color"]
 
     print(json.dumps(body))
     r = requests.post(YNAB_BASE + "/budgets/{}/transactions".format(budget), \
