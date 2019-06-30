@@ -91,6 +91,13 @@ Once the action is created, you need to add the following action fields:
 | *Required:*             | yes (This action field is required for Applets to work) |
 | *Action field type:*    | Text input / Other / none of the above |
 | | |
+| **Amount**               | |
+| *Label:*                | Amount |
+| *Optional helper text:* | The amount of the transaction. Positive for inflow, negative for outflow |
+| *Key name:*             | amount |
+| *Required:*             | yes (This action field is required for Applets to work) |
+| *Action field type:*    | Text input / Other / none of the above |
+| | |
 | **Payee name**          | |
 | *Label:*                | Payee name |
 | *Optional helper text:* | The name of the payee |
@@ -156,6 +163,108 @@ Once the action is created, you need to add the following action fields:
 | *Action field type:*    | Text input / Other / none of the above |
 
 See the [screenshot](https://raw.githubusercontent.com/woudt/ifttt2ynab/master/media/screenshot_ifttt_create_transaction_action.png) to give an idea of how the final result should look like.
+
+
+## 6. Configure the ynab adjust balance action in IFTTT (optional)
+
+IFTTT2YNAB supports a second action, which allows you to create an adjustment
+booking to change the balance of an account. This is useful e.g. to capture
+any profit/loss on an investment account.
+
+In IFTTT platform, go to API -> Actions and click on the New action button. 
+You can then enter the following details:
+- **Name:** `adjust balance` (can be changed to anything you like)
+- **Description:** `This action will adjust the balance of an account to the given amount.` (can be changed to anything you like)
+- **Verbiage:** `adjust the balance in YNAB` (can be changed to anything you like)
+- **Endpoint:** `ynab_adjust_balance` Note: this must match exactly!
+
+Once the action is created, you need to add the following action fields:
+
+| **Budget**              |        |
+|:------------------------|:-------|
+| *Label:*                | Budget |
+| *Optional helper text:* | Select the budget on which to adjust the balance |
+| *Key name:*             | budget |
+| *Required:*             | yes (This action field is required for Applets to work) |
+| *Action field type:*    | Dropdown list / Retrieve list items from my service |
+| | |
+| **Account name**        | |
+| *Label:*                | Account name |
+| *Optional helper text:* | The name of the account on which to adjust the balance |
+| *Key name:*             | account |
+| *Required:*             | yes (This action field is required for Applets to work) |
+| *Action field type:*    | Text input / Other / none of the above |
+| | |
+| **Date**                | |
+| *Label:*                | Date |
+| *Optional helper text:* | Use YYYY-MM-DD format. Or use ISO8601, in which case any time provided will be ignored. |
+| *Key name:*             | date |
+| *Required:*             | yes (This action field is required for Applets to work) |
+| *Action field type:*    | Text input / Other / none of the above |
+| | |
+| **New balance**         | |
+| *Label:*                | New balance |
+| *Optional helper text:* | The target balance on the account |
+| *Key name:*             | new_balance |
+| *Required:*             | yes (This action field is required for Applets to work) |
+| *Action field type:*    | Text input / Other / none of the above |
+| | |
+| **Payee name**          | |
+| *Label:*                | Payee name |
+| *Optional helper text:* | The name of the payee on the adjustment transaction |
+| *Key name:*             | date |
+| *Required:*             | no (This action field is optional) |
+| *Action field type:*    | Text input / Other / none of the above |
+| | |
+| **Category name**       | |
+| *Label:*                | Category name |
+| *Optional helper text:* | Leave blank for automatic categorisation based on payee name. Use an explicit category or 'Uncategorized' to disable automatic categorisation. |
+| *Key name:*             | category |
+| *Required:*             | no (This action field is optional) |
+| *Action field type:*    | Text input / Other / none of the above |
+| | |
+| **Memo**                | |
+| *Label:*                | Memo |
+| *Optional helper text:* | Description of the adjustment transaction |
+| *Key name:*             | memo |
+| *Required:*             | no (This action field is optional) |
+| *Action field type:*    | Text input / Messages / Short text |
+| | |
+| **Cleared**             | |
+| *Label:*                | Cleared |
+| *Optional helper text:* | Clearing status of the adjustment transaction after import |
+| *Key name:*             | cleared |
+| *Required:*             | yes (This action field is required for Applets to work)) |
+| *Action field type:*    | Dropdown list / Populate with the items specified here |
+|                         | Fill the following values in Label/Value: |
+|                         | - cleared / cleared |
+|                         | - uncleared / uncleared |
+|                         | - reconciled / reconciled |
+| | |
+| **Approved**            | |
+| *Label:*                | Approved |
+| *Optional helper text:* | Whether the adjustment transaction is approved after import |
+| *Key name:*             | approved |
+| *Required:*             | yes (This action field is required for Applets to work)) |
+| *Action field type:*    | Dropdown list / Populate with the items specified here |
+|                         | Fill the following values in Label/Value: |
+|                         | - true / true |
+|                         | - false / false |
+| | |
+| **Approved**            | |
+| *Label:*                | Flag color |
+| *Optional helper text:* | Optional flag on the adjustment transaction |
+| *Key name:*             | flag_color |
+| *Required:*             | yes (This action field is required for Applets to work)) |
+| *Action field type:*    | Dropdown list / Populate with the items specified here |
+|                         | Fill the following values in Label/Value: |
+|                         | - none / none |
+|                         | - red / red |
+|                         | - orange / orange |
+|                         | - yellow / yellow |
+|                         | - green / green |
+|                         | - blue / blue |
+|                         | - purple / purple |
 
 
 ## 6. Check your work
