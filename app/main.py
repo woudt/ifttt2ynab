@@ -293,7 +293,7 @@ def ifttt_create_action(default):
             print("[create_action] WARNING: unknown category, ignored")
 
     try:
-        if date == "":
+        if fields["date"] == "":
             date = arrow.now(data["user"]["timezone"]).format("YYYY-MM-DD")
         else:
             date = arrow.get(fields["date"]).format("YYYY-MM-DD")
@@ -429,7 +429,7 @@ def ifttt_adjust_balance_action(default):
             print("[adjust_balance_action] WARNING: unknown category, ignored")
 
     try:
-        if date == "":
+        if fields["date"] == "":
             date = arrow.now(data["user"]["timezone"]).format("YYYY-MM-DD")
         else:
             date = arrow.get(fields["date"]).format("YYYY-MM-DD")
