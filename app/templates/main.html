@@ -36,6 +36,19 @@
                         </div>
                         <button type="submit" class="btn btn-primary">{% if ynabkeyset %}Update{% else %}Submit{% endif %}</button>
                     </form>
+                    <br>
+                    Budgets:
+                    <ul>
+                        {% for b in budgets %}
+                        <li>{{ b.label }}
+                        {% if defaultbudget == b.value %}
+                        [default]
+                        {% else %}
+                        [<a href="/make_default?budget={{ b.value }}">make default</a>]
+                        {% endif %}
+                        </li>
+                        {% endfor %}
+                    </ul>
                 </div>
             </div>
         </div>

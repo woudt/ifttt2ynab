@@ -25,6 +25,7 @@ DSCLIENT = datastore.Client()
 
 IFTTT_SERVICE_KEY = None
 YNAB_ACCOUNT_KEY = None
+YNAB_DEFAULT_BUDGET = None
 WEB_SESSION_KEY = None
 
 YNAB_BASE = "https://api.youneedabudget.com/v1"
@@ -53,8 +54,20 @@ def ifttt_test_setup():
             "samples": {
                 "actions": {
                     "ynab_create": {
-                        "budget": "TEST#TEST#1",
-                        "account": "x",
+                        "budget": "x",
+                        "account": "TEST#TEST#1",
+                        "date": "x",
+                        "amount": "x",
+                        "payee": "x",
+                        "category": "x",
+                        "memo": "x",
+                        "cleared": "x",
+                        "approved": "x",
+                        "flag_color": "x",
+                        "import_id" : "x",
+                    },
+                    "ynab_create_default": {
+                        "account": "TEST#TEST#1",
                         "date": "x",
                         "amount": "x",
                         "payee": "x",
@@ -66,8 +79,8 @@ def ifttt_test_setup():
                         "import_id" : "x",
                     },
                     "ynab_adjust_balance": {
-                        "budget": "TEST#TEST#1",
-                        "account": "x",
+                        "budget": "x",
+                        "account": "TEST#TEST#1",
                         "date": "x",
                         "new_balance": "x",
                         "payee": "x",
@@ -76,12 +89,35 @@ def ifttt_test_setup():
                         "cleared": "x",
                         "approved": "x",
                         "flag_color": "x",
-                    }
+                    },
+                    "ynab_adjust_balance_default": {
+                        "account": "TEST#TEST#1",
+                        "date": "x",
+                        "new_balance": "x",
+                        "payee": "x",
+                        "category": "x",
+                        "memo": "x",
+                        "cleared": "x",
+                        "approved": "x",
+                        "flag_color": "x",
+                    },
                 },
                 "actionRecordSkipping": {
                     "ynab_create": {
-                        "budget": "TEST#TEST#2",
-                        "account": "x",
+                        "budget": "x",
+                        "account": "TEST#TEST#2",
+                        "date": "x",
+                        "amount": "x",
+                        "payee": "x",
+                        "category": "x",
+                        "memo": "x",
+                        "cleared": "x",
+                        "approved": "x",
+                        "flag_color": "x",
+                        "import_id" : "x",
+                    },
+                    "ynab_create_default": {
+                        "account": "TEST#TEST#2",
                         "date": "x",
                         "amount": "x",
                         "payee": "x",
@@ -93,8 +129,8 @@ def ifttt_test_setup():
                         "import_id" : "x",
                     },
                     "ynab_adjust_balance": {
-                        "budget": "TEST#TEST#2",
-                        "account": "x",
+                        "budget": "x",
+                        "account": "TEST#TEST#2",
                         "date": "x",
                         "new_balance": "x",
                         "payee": "x",
@@ -103,38 +139,91 @@ def ifttt_test_setup():
                         "cleared": "x",
                         "approved": "x",
                         "flag_color": "x",
-                    }
+                    },
+                    "ynab_adjust_balance_default": {
+                        "account": "TEST#TEST#2",
+                        "date": "x",
+                        "new_balance": "x",
+                        "payee": "x",
+                        "category": "x",
+                        "memo": "x",
+                        "cleared": "x",
+                        "approved": "x",
+                        "flag_color": "x",
+                    },
                 }
             }
         }
     })
 
-@app.route("/ifttt/v1/actions/ynab_create/fields/budget/options",
-           methods=["POST"])
-@app.route("/ifttt/v1/actions/ynab_adjust_balance/fields/budget/options",
-           methods=["POST"])
+
+@app.route("/ifttt/v1/actions/ynab_create/fields/"\
+           "budget/options", methods=["POST"])
+@app.route("/ifttt/v1/actions/ynab_adjust_balance/fields/"\
+           "budget/options", methods=["POST"])
 def ifttt_budget_options():
     """ Option values for the budget field """
     if "IFTTT-Service-Key" not in request.headers or \
             request.headers["IFTTT-Service-Key"] != get_ifttt_key():
         return json.dumps({"errors": [{"message": "Invalid key"}]}), 401
     try:
-        r = requests.get(YNAB_BASE + "/budgets", \
-            headers={"Authorization": "Bearer {}".format(get_ynab_key())})
-        budgets = r.json()["data"]["budgets"]
-        budgets = sorted(budgets, key=lambda x: x["last_modified_on"],
-                         reverse=True)
-        data = []
-        for b in budgets:
-            data.append({"label": b["name"], "value": b["id"]})
+        data = get_ynab_budgets()
         return json.dumps({"data": data})
     except:
         traceback.print_exc()
-        return json.dumps({"data": [{"name": "ERROR retrieving YNAB data",
+        return json.dumps({"data": [{"label": "ERROR retrieving YNAB data",
                                      "value": ""}]})
 
+@app.route("/ifttt/v1/actions/ynab_create_default/fields/"\
+           "account/options", methods=["POST"])
+@app.route("/ifttt/v1/actions/ynab_adjust_balance_default/fields/"\
+           "account/options", methods=["POST"])
+def ifttt_account_options():
+    """ Option values for the account field """
+    if "IFTTT-Service-Key" not in request.headers or \
+            request.headers["IFTTT-Service-Key"] != get_ifttt_key():
+        return json.dumps({"errors": [{"message": "Invalid key"}]}), 401
+    try:
+        if get_default_budget() is None:
+            return json.dumps({"data": [{"label": "ERROR no default budget",
+                                         "value": ""}]})
+        data = get_ynab_accounts()
+        return json.dumps({"data": data})
+    except:
+        traceback.print_exc()
+        return json.dumps({"data": [{"label": "ERROR retrieving YNAB data",
+                                     "value": ""}]})
+
+@app.route("/ifttt/v1/actions/ynab_create_default/fields/"\
+           "category/options", methods=["POST"])
+@app.route("/ifttt/v1/actions/ynab_adjust_balance_default/fields/"\
+           "category/options", methods=["POST"])
+def ifttt_category_options():
+    """ Option values for the category field """
+    if "IFTTT-Service-Key" not in request.headers or \
+            request.headers["IFTTT-Service-Key"] != get_ifttt_key():
+        return json.dumps({"errors": [{"message": "Invalid key"}]}), 401
+    try:
+        if get_default_budget() is None:
+            return json.dumps({"data": [{"label": "ERROR no default budget",
+                                         "value": ""}]})
+        data = get_ynab_categories()
+        return json.dumps({"data": data})
+    except:
+        traceback.print_exc()
+        return json.dumps({"data": [{"label": "ERROR retrieving YNAB data",
+                                     "value": ""}]})
+
+
 @app.route("/ifttt/v1/actions/ynab_create", methods=["POST"])
-def ifttt_create_action():
+def ifttt_create_action_1():
+    return ifttt_create_action(False)
+
+@app.route("/ifttt/v1/actions/ynab_create_default", methods=["POST"])
+def ifttt_create_action_2():
+    return ifttt_create_action(True)
+
+def ifttt_create_action(default):
     """ Main endpoint to create a transaction in YNAB """
     if "IFTTT-Service-Key" not in request.headers or \
             request.headers["IFTTT-Service-Key"] != get_ifttt_key():
@@ -146,17 +235,27 @@ def ifttt_create_action():
         return json.dumps({"errors": [{"status": "SKIP", \
             "message": "Invalid data: actionFields missing"}]}), 400
     fields = data["actionFields"]
-    for x in ["budget", "account", "date", "amount", "payee", "category",
+    for x in ["account", "date", "amount", "payee", "category",
               "memo", "cleared", "approved", "flag_color", "import_id"]:
         if x not in fields:
             print("[create_action] ERROR: missing field: "+x)
             return json.dumps({"errors": [{"status": "SKIP", \
                 "message": "Invalid data: missing field: "+x}]}), 400
+    if not default and "budget" not in fields:
+        print("[adjust_balance_action] ERROR: missing field: budget")
+        return json.dumps({"errors": [{"status": "SKIP", \
+            "message": "Invalid data: missing field: "+x}]}), 400
 
-    budget = fields["budget"]
-    if budget == "TEST#TEST#1":
+    if default:
+        budget = get_default_budget()
+    else:
+        budget = fields["budget"]
+
+    account = fields["account"]
+
+    if account == "TEST#TEST#1":
         return json.dumps({"data": [{"id": uuid.uuid4().hex}]})
-    if budget == "TEST#TEST#2":
+    if account == "TEST#TEST#2":
         return json.dumps({"errors": [{"status": "SKIP",
                                        "message": "Test"}]}), 400
     if len(str(budget)) != 36:
@@ -164,13 +263,14 @@ def ifttt_create_action():
         return json.dumps({"errors": [{"status": "SKIP", \
             "message": "Invalid data: incorrect budget: "+budget}]}), 400
 
-    account = fields["account"]
     r = requests.get(YNAB_BASE + "/budgets/{}/accounts".format(budget), \
         headers={"Authorization": "Bearer {}".format(get_ynab_key())})
     results = r.json()["data"]["accounts"]
     account_id = None
     for a in results:
-        if a["name"] == account:
+        if a["id"] == account:
+            account_id = a["id"]
+        elif a["name"] == account:
             account_id = a["id"]
     if account_id is None:
         print("[create_action] ERROR: account not found")
@@ -185,13 +285,18 @@ def ifttt_create_action():
         results = r.json()["data"]["category_groups"]
         for g in results:
             for c in g["categories"]:
-                if c["name"] == category:
+                if c["id"] == category:
+                    category_id = c["id"]
+                elif c["name"] == category:
                     category_id = c["id"]
         if category_id is None:
             print("[create_action] WARNING: unknown category, ignored")
 
     try:
-        date = arrow.get(fields["date"]).format("YYYY-MM-DD")
+        if date == "":
+            date = arrow.now(data["user"]["timezone"]).format("YYYY-MM-DD")
+        else:
+            date = arrow.get(fields["date"]).format("YYYY-MM-DD")
     except:
         print("[create_action] ERROR: invalid date: "+fields["date"])
         return json.dumps({"errors": [{"status": "SKIP",
@@ -242,8 +347,16 @@ def ifttt_create_action():
 
     return json.dumps({"data": [{"id": uuid.uuid4().hex}]})
 
+
 @app.route("/ifttt/v1/actions/ynab_adjust_balance", methods=["POST"])
-def ifttt_adjust_balance_action():
+def ifttt_adjust_balance_action_1():
+    return ifttt_adjust_balance_action(False)
+
+@app.route("/ifttt/v1/actions/ynab_adjust_balance_default", methods=["POST"])
+def ifttt_adjust_balance_action_2():
+    return ifttt_adjust_balance_action(True)
+
+def ifttt_adjust_balance_action(default):
     """ Main endpoint to adjust a balance of an account in YNAB """
     if "IFTTT-Service-Key" not in request.headers or \
             request.headers["IFTTT-Service-Key"] != get_ifttt_key():
@@ -255,17 +368,27 @@ def ifttt_adjust_balance_action():
         return json.dumps({"errors": [{"status": "SKIP", \
             "message": "Invalid data: actionFields missing"}]}), 400
     fields = data["actionFields"]
-    for x in ["budget", "account", "date", "new_balance", "payee", "category",
+    for x in ["account", "date", "new_balance", "payee", "category",
               "memo", "cleared", "approved", "flag_color"]:
         if x not in fields:
             print("[adjust_balance_action] ERROR: missing field: "+x)
             return json.dumps({"errors": [{"status": "SKIP", \
                 "message": "Invalid data: missing field: "+x}]}), 400
+    if not default and "budget" not in fields:
+        print("[adjust_balance_action] ERROR: missing field: budget")
+        return json.dumps({"errors": [{"status": "SKIP", \
+            "message": "Invalid data: missing field: "+x}]}), 400
 
-    budget = fields["budget"]
-    if budget == "TEST#TEST#1":
+    if default:
+        budget = get_default_budget()
+    else:
+        budget = fields["budget"]
+
+    account = fields["account"]
+
+    if account == "TEST#TEST#1":
         return json.dumps({"data": [{"id": uuid.uuid4().hex}]})
-    if budget == "TEST#TEST#2":
+    if account == "TEST#TEST#2":
         return json.dumps({"errors": [{"status": "SKIP",
                                        "message": "Test"}]}), 400
     if len(str(budget)) != 36:
@@ -274,13 +397,15 @@ def ifttt_adjust_balance_action():
         return json.dumps({"errors": [{"status": "SKIP", \
             "message": "Invalid data: incorrect budget: "+budget}]}), 400
 
-    account = fields["account"]
     r = requests.get(YNAB_BASE + "/budgets/{}/accounts".format(budget), \
         headers={"Authorization": "Bearer {}".format(get_ynab_key())})
     results = r.json()["data"]["accounts"]
     account_id = None
     for a in results:
-        if a["name"] == account:
+        if a["id"] == account:
+            account_id = a["id"]
+            old_balance = a["balance"]
+        elif a["name"] == account:
             account_id = a["id"]
             old_balance = a["balance"]
     if account_id is None:
@@ -296,13 +421,18 @@ def ifttt_adjust_balance_action():
         results = r.json()["data"]["category_groups"]
         for g in results:
             for c in g["categories"]:
-                if c["name"] == category:
+                if c["id"] == category:
+                    category_id = c["id"]
+                elif c["name"] == category:
                     category_id = c["id"]
         if category_id is None:
             print("[adjust_balance_action] WARNING: unknown category, ignored")
 
     try:
-        date = arrow.get(fields["date"]).format("YYYY-MM-DD")
+        if date == "":
+            date = arrow.now(data["user"]["timezone"]).format("YYYY-MM-DD")
+        else:
+            date = arrow.get(fields["date"]).format("YYYY-MM-DD")
     except:
         print("[adjust_balance_action] ERROR: invalid date: "+fields["date"])
         return json.dumps({"errors": [{"status": "SKIP",
@@ -355,6 +485,70 @@ def ifttt_adjust_balance_action():
 
 
 ###############################################################################
+# YNAB interface methods                                                      #
+###############################################################################
+
+def get_ynab_budgets():
+    data = []
+    if get_ynab_key() is not None:
+        r = requests.get(YNAB_BASE + "/budgets", \
+            headers={"Authorization": "Bearer {}".format(get_ynab_key())})
+        budgets = r.json()["data"]["budgets"]
+        budgets = sorted(budgets, key=lambda x: x["last_modified_on"],
+                            reverse=True)
+        for b in budgets:
+            data.append({"label": b["name"], "value": b["id"]})
+    return data
+
+def get_ynab_accounts(budget=None):
+    if budget is None:
+        budget = get_default_budget()
+    r = requests.get(YNAB_BASE + "/budgets/{}/accounts".format(budget), \
+        headers={"Authorization": "Bearer {}".format(get_ynab_key())})
+    results = r.json()["data"]["accounts"]
+    data1 = []
+    data2 = []
+    data3 = []
+    for a in results:
+        if a["closed"]:
+            data3.append({"label": "- " + a["name"], "value": a["id"],
+                          "alias": a["name"]})
+        elif a["on_budget"]:
+            data1.append({"label": "- " + a["name"], "value": a["id"],
+                          "alias": a["name"]})
+        else:
+            data2.append({"label": "- " + a["name"], "value": a["id"],
+                          "alias": a["name"]})
+    data1 = sorted(data1, key=lambda x: x["label"])
+    data2 = sorted(data2, key=lambda x: x["label"])
+    data3 = sorted(data3, key=lambda x: x["label"])
+    return [
+        {"label": "Budget", "values": data1},
+        {"label": "Tracking", "values": data2},
+        {"label": "Closed", "values": data3},
+    ]
+
+def get_ynab_categories(budget=None):
+    if budget is None:
+        budget = get_default_budget()
+    r = requests.get(YNAB_BASE + "/budgets/{}/categories".format(budget), \
+        headers={"Authorization": "Bearer {}".format(get_ynab_key())})
+    results = r.json()["data"]["category_groups"]
+    data = [{"label": "(automatic)", "value": ""}]
+    for g in results:
+        groupvalues = []
+        for c in g["categories"]:
+            groupvalues.append({"label": "- " + c["name"], "value": c["id"],
+                                "alias1": g["name"] + "|" + c["name"],
+                                "alias2": c["name"]})
+        if g["name"] == "Internal Master Category":
+            data.insert(1, {"label": g["name"], "values": groupvalues})
+        else:
+            data.append({"label": g["name"], "values": groupvalues})
+    return data
+
+
+###############################################################################
 # Config storage/caching                                                      #
 ###############################################################################
 
@@ -383,6 +577,19 @@ def get_ynab_key():
     except:
         traceback.print_exc()
     return YNAB_ACCOUNT_KEY
+
+def get_default_budget():
+    """ Returns the default YNAB budget uuid """
+    global YNAB_DEFAULT_BUDGET
+    try:
+        if YNAB_DEFAULT_BUDGET is None:
+            key = DSCLIENT.key("config", "ynab_default_budget")
+            entity = DSCLIENT.get(key)
+            if entity is not None:
+                YNAB_DEFAULT_BUDGET = entity["value"]
+    except:
+        traceback.print_exc()
+    return YNAB_DEFAULT_BUDGET
 
 def get_session_key():
     """ Returns the web interface session key """
@@ -423,8 +630,11 @@ def home_get():
         return render_template("start.html")
     iftttkeyset = (get_ifttt_key() is not None)
     ynabkeyset = (get_ynab_key() is not None)
+    budgets = get_ynab_budgets()
+    defaultbudget = get_default_budget()
     return render_template("main.html",\
-        iftttkeyset=iftttkeyset, ynabkeyset=ynabkeyset)
+        iftttkeyset=iftttkeyset, ynabkeyset=ynabkeyset,
+        budgets=budgets, defaultbudget=defaultbudget)
 
 @app.route("/login", methods=["POST"])
 def user_login():
@@ -517,6 +727,31 @@ def ynab_key():
         traceback.print_exc()
         return render_template("message.html", msgtype="danger", msg=\
             'Error while processing YNAB token. See the logs. <br><br>'\
+            '<a href="/">Click here to return home</a>')
+
+@app.route("/make_default", methods=["GET"])
+def make_default():
+    global YNAB_DEFAULT_BUDGET
+    try:
+        cookie = request.cookies.get('session')
+        if cookie is None or cookie != get_session_key():
+            return render_template("message.html", msgtype="danger", msg=\
+                "Invalid request: session cookie not set or not valid")
+
+        budgetid = request.args["budget"]
+        uuid.UUID(budgetid) # check if valid uuid
+
+        entity = datastore.Entity(key=DSCLIENT.key("config",
+                                                   "ynab_default_budget"))
+        entity["value"] = budgetid
+        DSCLIENT.put(entity)
+        YNAB_DEFAULT_BUDGET = budgetid
+
+        return redirect("/")
+    except:
+        traceback.print_exc()
+        return render_template("message.html", msgtype="danger", msg=\
+            'Error while processing default budget. See the logs. <br><br>'\
             '<a href="/">Click here to return home</a>')
 
 
