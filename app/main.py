@@ -768,7 +768,9 @@ def process_months(old, data, first_month, curfmt, knowledge, first, triggers):
             triggers.append(trig)
 
     # only keep records younger than 1 day
-    result2 = {"changed": []}
+    result2 = {"changed": [], "triggers": []}
+    if "triggers" in result:
+        result2["triggers"] = result["triggers"]
     if not first: # do not keep anything on first run
         for change in result["changed"]:
             if change["meta"]["timestamp"] > now.timestamp - 86400:
