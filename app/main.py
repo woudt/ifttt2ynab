@@ -52,6 +52,11 @@ def ifttt_test_setup():
     return json.dumps({
         "data": {
             "samples": {
+                "triggers": {
+                    "ynab_month_updated": {
+                        "budget": "TEST",
+                    }
+                },
                 "actions": {
                     "ynab_create": {
                         "budget": "x",
@@ -160,6 +165,8 @@ def ifttt_test_setup():
 @app.route("/ifttt/v1/actions/ynab_create/fields/"\
            "budget/options", methods=["POST"])
 @app.route("/ifttt/v1/actions/ynab_adjust_balance/fields/"\
+           "budget/options", methods=["POST"])
+@app.route("/ifttt/v1/triggers/ynab_month_updated/fields/"\
            "budget/options", methods=["POST"])
 def ifttt_budget_options():
     """ Option values for the budget field """
@@ -484,9 +491,253 @@ def ifttt_adjust_balance_action(default):
     return json.dumps({"data": [{"id": uuid.uuid4().hex}]})
 
 
+@app.route("/ifttt/v1/triggers/ynab_month_updated", methods=["POST"])
+def ifttt_month_updated():
+    """ Option values for the budget field """
+    if "IFTTT-Service-Key" not in request.headers or \
+            request.headers["IFTTT-Service-Key"] != get_ifttt_key():
+        print("[month_updated] ERROR: invalid IFTTT service key!")
+        return json.dumps({"errors": [{"message": "Invalid key"}]}), 401
+
+    try:
+        data = request.get_json()
+        print("[month_updated] input: {}".format(json.dumps(data)))
+
+        if "triggerFields" not in data or\
+                "budget" not in data["triggerFields"]:
+            print("[month_updated] ERROR: budget field missing!")
+            return json.dumps({"errors": [{"message": "Invalid data"}]}), 400
+        budget = data["triggerFields"]["budget"]
+
+        if budget == "TEST":
+            budget = get_default_budget()
+            if budget is None:
+                print("[month_updated] ERROR: default budget not set!")
+                return json.dumps({"errors": [{"message": "No default"}]}), 400
+
+        if "trigger_identity" not in data:
+            print("[month_updated] ERROR: trigger_identity field missing!")
+            return json.dumps({"errors": [{"message": "Invalid data"}]}), 400
+        identity = data["trigger_identity"]
+
+        limit = 50
+        if "limit" in data:
+            limit = data["limit"]
+
+        timezone = "UTC"
+        if "user" in data and "timezone" in data["user"]:
+            timezone = data["user"]["timezone"]
+
+        entity = DSCLIENT.get(DSCLIENT.key("budget", budget))
+        if entity is None:
+            print("[month_updated] WARNING: budget not found "+budget)
+            results = []
+        else:
+            results = json.loads(entity["months"])["changed"]
+            for result in results:
+                result["created_at"] = arrow.get(result["created_at"])\
+                                       .to(timezone).isoformat()
+
+        # ensure at least three updates when testing
+        if data["triggerFields"]["budget"] == "TEST" and len(results) < 3:
+            update1 = results[0].copy()
+            update1["meta"] = update1["meta"].copy()
+            update1["meta"]["id"] = "1_" + update1["meta"]["id"]
+            update2 = results[0].copy()
+            update2["meta"] = update2["meta"].copy()
+            update2["meta"]["id"] = "2_" + update2["meta"]["id"]
+            results.append(update1)
+            results.append(update2)
+
+        print("[month_updated] Found {} updates"
+              .format(len(results)))
+        return json.dumps({"data": results[:limit]})
+
+    except:
+        traceback.print_exc()
+        print("[month_updated] ERROR: cannot retrieve transactions")
+        return json.dumps({"errors": [{"message": \
+                           "Cannot retrieve transactions"}]}), 400
+
+
 ###############################################################################
 # YNAB interface methods                                                      #
 ###############################################################################
+
+@app.route("/cron/ynab", methods=["GET"])
+def cron():
+    budget = get_default_budget()
+    entity = DSCLIENT.get(DSCLIENT.key("budget", budget))
+    if entity is None:
+        entity = datastore.Entity(DSCLIENT.key("budget", budget),\
+                 exclude_from_indexes=['config', 'accounts', 'categories',
+                                       'months', 'month_categories',
+                                       'payees', 'transactions'])
+        entity['accounts'] = json.dumps({})
+        entity['categories'] = json.dumps({})
+        entity['months'] = json.dumps({})
+        entity['month_categories'] = json.dumps({})
+        entity['payees'] = json.dumps({})
+        entity['transactions'] = json.dumps({})
+        first = True
+    else:
+        first = False
+        knowledge = json.loads(entity['config'])['knowledge']
+
+    url = YNAB_BASE + "/budgets/{}".format(budget)
+    if not first:
+        url += "?last_knowledge_of_server={}".format(knowledge)
+
+    r = requests.get(url,\
+        headers={"Authorization": "Bearer {}".format(get_ynab_key())})
+    result = r.json()["data"]
+    data = result["budget"]
+
+    config = {
+        'id': data['id'],
+        'name': data['name'],
+        'knowledge': result['server_knowledge']
+    }
+    entity['config'] = json.dumps(config)
+
+    accounts = json.loads(entity["accounts"])
+    accounts = process_accounts(accounts,
+                                data["accounts"],
+                                data["currency_format"],
+                                result['server_knowledge'],
+                                first)
+    entity["accounts"] = json.dumps(accounts)
+
+    categories = json.loads(entity["categories"])
+    categories = process_categories(accounts,
+                                    data["categories"],
+                                    data["category_groups"],
+                                    data["currency_format"],
+                                    result['server_knowledge'],
+                                    first)
+    entity["categories"] = json.dumps(categories)
+
+    months = json.loads(entity["months"])
+    months = process_months(months,
+                            data["months"],
+                            data["first_month"],
+                            data["currency_format"],
+                            result['server_knowledge'],
+                            first)
+    entity["months"] = json.dumps(months)
+
+    month_categories = json.loads(entity["month_categories"])
+    month_categories = process_month_categories(month_categories,
+                                                categories,
+                                                data["months"],
+                                                data["first_month"],
+                                                data["currency_format"],
+                                                result['server_knowledge'],
+                                                first)
+    entity["month_categories"] = json.dumps(month_categories)
+
+    payees = json.loads(entity["payees"])
+    payees = process_payees(payees,
+                            data["payees"],
+                            data["currency_format"],
+                            result['server_knowledge'],
+                            first)
+    entity["payees"] = json.dumps(payees)
+
+    transactions = json.loads(entity["transactions"])
+    transactions = process_transactions(transactions,
+                                        accounts,
+                                        categories,
+                                        payees,
+                                        data["transactions"],
+                                        data["currency_format"],
+                                        result['server_knowledge'],
+                                        first)
+    entity["transactions"] = json.dumps(transactions)
+
+    DSCLIENT.put(entity)
+    return json.dumps({
+        "config": config,
+        "accounts": accounts,
+        "categories": categories,
+        "month_categories": month_categories,
+        "months": months,
+        "payees": payees,
+        "transactions": transactions,
+        "data": result
+    })
+
+def process_accounts(old, data, curfmt, knowledge, first):
+    return []
+
+def process_categories(old, data, groupdata, curfmt, knowledge, first):
+    return []
+
+def process_months(old, data, first_month, curfmt, knowledge, first):
+    if not old or "changed" not in old:
+        result = {"changed": []}
+    else:
+        result = old
+
+    now = arrow.utcnow()
+
+    for month in data:
+        date = arrow.get(first_month)
+        target = arrow.get(month["month"])
+        index = 1
+        while date < target:
+            index += 1
+            date = date.shift(months=1)
+        item = {
+            "created_at": now.isoformat(),
+            "month": month["month"][:7],
+            "relative_index": index,
+            "income": convert_amount(month["income"], curfmt),
+            "budgeted": convert_amount(month["budgeted"], curfmt),
+            "activity": convert_amount(month["activity"], curfmt),
+            "to_be_budgeted": convert_amount(month["to_be_budgeted"], curfmt),
+            "age_of_money": month["age_of_money"],
+            "meta": {
+                "id": month["month"] + "_" + str(knowledge),
+                "timestamp": now.timestamp
+            }
+        }
+        result["changed"].insert(0, item)
+
+    # only keep records younger than 1 day
+    result2 = {"changed": []}
+    if not first: # do not keep anything on first run
+        for change in result["changed"]:
+            if change["meta"]["timestamp"] > now.timestamp - 86400:
+                result2["changed"].append(change)
+    # but never delete the last record
+    if not result2["changed"] and result["changed"]:
+        result2["changed"].append(result["changed"][0])
+
+    return result2
+
+def process_month_categories(old, categories, data, first_month, curfmt,
+                             knowledge, first):
+    return []
+
+def process_payees(old, data, curfmt, knowledge, first):
+    return []
+
+def process_transactions(old, accounts, categories, payees, data, curfmt,
+                         knowledge, first):
+    return []
+
+def convert_amount(amount, curfmt):
+    digits = curfmt["decimal_digits"]
+    if digits == 0:
+        return "{}".format(amount // 1000)
+    elif digits == 1:
+        return "{:.1f}".format((amount // 100) / 10)
+    elif digits == 2:
+        return "{:.2f}".format((amount // 10) / 100)
+    else:
+        return "{:.3f}".format(amount / 1000)
+
 
 def get_ynab_budgets():
     data = []
@@ -495,7 +746,7 @@ def get_ynab_budgets():
             headers={"Authorization": "Bearer {}".format(get_ynab_key())})
         budgets = r.json()["data"]["budgets"]
         budgets = sorted(budgets, key=lambda x: x["last_modified_on"],
-                            reverse=True)
+                         reverse=True)
         for b in budgets:
             data.append({"label": b["name"], "value": b["id"]})
     return data
@@ -633,7 +884,7 @@ def home_get():
     budgets = get_ynab_budgets()
     defaultbudget = get_default_budget()
     return render_template("main.html",\
-        iftttkeyset=iftttkeyset, ynabkeyset=ynabkeyset,
+        iftttkeyset=iftttkeyset, ynabkeyset=ynabkeyset,\
         budgets=budgets, defaultbudget=defaultbudget)
 
 @app.route("/login", methods=["POST"])

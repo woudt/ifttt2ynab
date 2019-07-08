@@ -1,0 +1,4 @@
+cron:
+- description: "YNAB cron"
+  url: /cron/ynab
+  schedule: every 15 minutes
