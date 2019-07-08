@@ -518,7 +518,7 @@ def ifttt_month_updated():
         if "trigger_identity" not in data:
             print("[month_updated] ERROR: trigger_identity field missing!")
             return json.dumps({"errors": [{"message": "Invalid data"}]}), 400
-        identity = data["trigger_identity"]
+        triggerid = data["trigger_identity"]
 
         limit = 50
         if "limit" in data:
@@ -533,7 +533,20 @@ def ifttt_month_updated():
             print("[month_updated] WARNING: budget not found "+budget)
             results = []
         else:
-            results = json.loads(entity["months"])["changed"]
+            months = json.loads(entity["months"])
+            if "triggers" not in months:
+                triggers = []
+            else:
+                triggers = months["triggers"]
+            if triggerid not in triggers:
+                print(triggers)
+                print("Adding new trigger: "+triggerid)
+                triggers.append(triggerid)
+                months["triggers"] = triggers
+                entity["months"] = json.dumps(months)
+                DSCLIENT.put(entity)
+
+            results = months["changed"]
             for result in results:
                 result["created_at"] = arrow.get(result["created_at"])\
                                        .to(timezone).isoformat()
@@ -558,6 +571,27 @@ def ifttt_month_updated():
         print("[month_updated] ERROR: cannot retrieve transactions")
         return json.dumps({"errors": [{"message": \
                            "Cannot retrieve transactions"}]}), 400
+
+@app.route("/ifttt/v1/triggers/ynab_month_updated/trigger_identity/" +
+           "<triggerid>", methods=["DELETE"])
+def ifttt_month_updated_delete_trigger(triggerid):
+    budget = get_default_budget()
+    entity = DSCLIENT.get(DSCLIENT.key("budget", budget))
+    if entity is not None:
+        for typ in ['accounts', 'categories', 'months', 'month_categories',
+                    'payees', 'transactions']:
+            data = entity[typ]
+            if data is not None:
+                data = json.loads(data)
+                if "triggers" in data:
+                    if triggerid in data["triggers"]:
+                        newtriggers = []
+                        for trig in data["triggers"]:
+                            if trig != triggerid:
+                                newtriggers.append(trig)
+                        data["triggers"] = newtriggers
+                        entity[typ] = json.dumps(data)
+                        DSCLIENT.put(entity)
 
 
 ###############################################################################
@@ -600,12 +634,15 @@ def cron():
     }
     entity['config'] = json.dumps(config)
 
+    triggers = []
+
     accounts = json.loads(entity["accounts"])
     accounts = process_accounts(accounts,
                                 data["accounts"],
                                 data["currency_format"],
                                 result['server_knowledge'],
-                                first)
+                                first,
+                                triggers)
     entity["accounts"] = json.dumps(accounts)
 
     categories = json.loads(entity["categories"])
@@ -614,7 +651,8 @@ def cron():
                                     data["category_groups"],
                                     data["currency_format"],
                                     result['server_knowledge'],
-                                    first)
+                                    first,
+                                    triggers)
     entity["categories"] = json.dumps(categories)
 
     months = json.loads(entity["months"])
@@ -623,7 +661,8 @@ def cron():
                             data["first_month"],
                             data["currency_format"],
                             result['server_knowledge'],
-                            first)
+                            first,
+                            triggers)
     entity["months"] = json.dumps(months)
 
     month_categories = json.loads(entity["month_categories"])
@@ -633,7 +672,8 @@ def cron():
                                                 data["first_month"],
                                                 data["currency_format"],
                                                 result['server_knowledge'],
-                                                first)
+                                                first,
+                                                triggers)
     entity["month_categories"] = json.dumps(month_categories)
 
     payees = json.loads(entity["payees"])
@@ -641,7 +681,8 @@ def cron():
                             data["payees"],
                             data["currency_format"],
                             result['server_knowledge'],
-                            first)
+                            first,
+                            triggers)
     entity["payees"] = json.dumps(payees)
 
     transactions = json.loads(entity["transactions"])
@@ -652,10 +693,27 @@ def cron():
                                         data["transactions"],
                                         data["currency_format"],
                                         result['server_knowledge'],
-                                        first)
+                                        first,
+                                        triggers)
     entity["transactions"] = json.dumps(transactions)
 
     DSCLIENT.put(entity)
+
+    if triggers:
+        print("Updating triggers: " + json.dumps(triggers))
+        data = {"data": []}
+        for triggerid in triggers:
+            data["data"].append({"trigger_identity": triggerid})
+        headers = {
+            "IFTTT-Channel-Key": get_ifttt_key(),
+            "IFTTT-Service-Key": get_ifttt_key(),
+            "X-Request-ID": uuid.uuid4().hex,
+            "Content-Type": "application/json"
+        }
+        res = requests.post("https://realtime.ifttt.com/v1/notifications",
+                            headers=headers, data=json.dumps(data))
+        print(res.text)
+
     return json.dumps({
         "config": config,
         "accounts": accounts,
@@ -667,13 +725,14 @@ def cron():
         "data": result
     })
 
-def process_accounts(old, data, curfmt, knowledge, first):
+def process_accounts(old, data, curfmt, knowledge, first, triggers):
     return []
 
-def process_categories(old, data, groupdata, curfmt, knowledge, first):
+def process_categories(old, data, groupdata, curfmt, knowledge, first,
+                       triggers):
     return []
 
-def process_months(old, data, first_month, curfmt, knowledge, first):
+def process_months(old, data, first_month, curfmt, knowledge, first, triggers):
     if not old or "changed" not in old:
         result = {"changed": []}
     else:
@@ -704,6 +763,10 @@ def process_months(old, data, first_month, curfmt, knowledge, first):
         }
         result["changed"].insert(0, item)
 
+    if data and "triggers" in result:
+        for trig in result["triggers"]:
+            triggers.append(trig)
+
     # only keep records younger than 1 day
     result2 = {"changed": []}
     if not first: # do not keep anything on first run
@@ -717,14 +780,14 @@ def process_months(old, data, first_month, curfmt, knowledge, first):
     return result2
 
 def process_month_categories(old, categories, data, first_month, curfmt,
-                             knowledge, first):
+                             knowledge, first, triggers):
     return []
 
-def process_payees(old, data, curfmt, knowledge, first):
+def process_payees(old, data, curfmt, knowledge, first, triggers):
     return []
 
 def process_transactions(old, accounts, categories, payees, data, curfmt,
-                         knowledge, first):
+                         knowledge, first, triggers):
     return []
 
 def convert_amount(amount, curfmt):
