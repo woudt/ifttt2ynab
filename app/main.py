@@ -714,16 +714,17 @@ def cron():
                             headers=headers, data=json.dumps(data))
         print(res.text)
 
-    return json.dumps({
-        "config": config,
-        "accounts": accounts,
-        "categories": categories,
-        "month_categories": month_categories,
-        "months": months,
-        "payees": payees,
-        "transactions": transactions,
-        "data": result
-    })
+    return ""
+    #return json.dumps({
+    #    "config": config,
+    #    "accounts": accounts,
+    #    "categories": categories,
+    #    "month_categories": month_categories,
+    #    "months": months,
+    #    "payees": payees,
+    #    "transactions": transactions,
+    #    "data": result
+    #})
 
 def process_accounts(old, data, curfmt, knowledge, first, triggers):
     return []
