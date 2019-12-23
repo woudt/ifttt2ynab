@@ -32,7 +32,7 @@ YNAB_BASE = "https://api.youneedabudget.com/v1"
 
 
 ###############################################################################
-# IFTTT interfacing methods                                                   #
+# IFTTT test methods                                                          #
 ###############################################################################
 
 @app.route("/ifttt/v1/status")
@@ -162,6 +162,10 @@ def ifttt_test_setup():
     })
 
 
+###############################################################################
+# IFTTT field dropdown methods                                                #
+###############################################################################
+
 @app.route("/ifttt/v1/actions/ynab_create/fields/"\
            "budget/options", methods=["POST"])
 @app.route("/ifttt/v1/actions/ynab_adjust_balance/fields/"\
@@ -221,6 +225,10 @@ def ifttt_category_options():
         return json.dumps({"data": [{"label": "ERROR retrieving YNAB data",
                                      "value": ""}]})
 
+
+###############################################################################
+# IFTTT create transaction action                                             #
+###############################################################################
 
 @app.route("/ifttt/v1/actions/ynab_create", methods=["POST"])
 def ifttt_create_action_1():
@@ -354,6 +362,10 @@ def ifttt_create_action(default):
 
     return json.dumps({"data": [{"id": uuid.uuid4().hex}]})
 
+
+###############################################################################
+# IFTTT adjust balance action                                                 #
+###############################################################################
 
 @app.route("/ifttt/v1/actions/ynab_adjust_balance", methods=["POST"])
 def ifttt_adjust_balance_action_1():
@@ -491,6 +503,10 @@ def ifttt_adjust_balance_action(default):
     return json.dumps({"data": [{"id": uuid.uuid4().hex}]})
 
 
+###############################################################################
+# IFTTT month is updated trigger                                              #
+###############################################################################
+
 @app.route("/ifttt/v1/triggers/ynab_month_updated", methods=["POST"])
 def ifttt_month_updated():
     """ Option values for the budget field """
@@ -600,104 +616,106 @@ def ifttt_month_updated_delete_trigger(triggerid):
 
 @app.route("/cron/ynab", methods=["GET"])
 def cron():
-    budget = get_default_budget()
-    entity = DSCLIENT.get(DSCLIENT.key("budget", budget))
-    if entity is None:
-        entity = datastore.Entity(DSCLIENT.key("budget", budget),\
-                 exclude_from_indexes=['config', 'accounts', 'categories',
-                                       'months', 'month_categories',
-                                       'payees', 'transactions'])
-        entity['accounts'] = json.dumps({})
-        entity['categories'] = json.dumps({})
-        entity['months'] = json.dumps({})
-        entity['month_categories'] = json.dumps({})
-        entity['payees'] = json.dumps({})
-        entity['transactions'] = json.dumps({})
-        first = True
-    else:
-        first = False
-        knowledge = json.loads(entity['config'])['knowledge']
-
-    url = YNAB_BASE + "/budgets/{}".format(budget)
-    if not first:
-        url += "?last_knowledge_of_server={}".format(knowledge)
-
-    r = requests.get(url,\
-        headers={"Authorization": "Bearer {}".format(get_ynab_key())})
-    result = r.json()["data"]
-    data = result["budget"]
-
-    config = {
-        'id': data['id'],
-        'name': data['name'],
-        'knowledge': result['server_knowledge']
-    }
-    entity['config'] = json.dumps(config)
-
     triggers = []
+    budgets = get_ynab_budgets()
 
-    accounts = json.loads(entity["accounts"])
-    accounts = process_accounts(accounts,
-                                data["accounts"],
-                                data["currency_format"],
-                                result['server_knowledge'],
-                                first,
-                                triggers)
-    entity["accounts"] = json.dumps(accounts)
+    for budget in [b["value"] for b in budgets]:
 
-    categories = json.loads(entity["categories"])
-    categories = process_categories(accounts,
-                                    data["categories"],
-                                    data["category_groups"],
+        entity = DSCLIENT.get(DSCLIENT.key("budget", budget))
+        if entity is None:
+            entity = datastore.Entity(DSCLIENT.key("budget", budget),\
+                    exclude_from_indexes=['config', 'accounts', 'categories',
+                                        'months', 'month_categories',
+                                        'payees', 'transactions'])
+            entity['accounts'] = json.dumps({})
+            entity['categories'] = json.dumps({})
+            entity['months'] = json.dumps({})
+            entity['month_categories'] = json.dumps({})
+            entity['payees'] = json.dumps({})
+            entity['transactions'] = json.dumps({})
+            first = True
+        else:
+            first = False
+            knowledge = json.loads(entity['config'])['knowledge']
+
+        url = YNAB_BASE + "/budgets/{}".format(budget)
+        if not first:
+            url += "?last_knowledge_of_server={}".format(knowledge)
+
+        r = requests.get(url,\
+            headers={"Authorization": "Bearer {}".format(get_ynab_key())})
+        result = r.json()["data"]
+        data = result["budget"]
+
+        config = {
+            'id': data['id'],
+            'name': data['name'],
+            'knowledge': result['server_knowledge']
+        }
+        entity['config'] = json.dumps(config)
+
+        accounts = json.loads(entity["accounts"])
+        accounts = process_accounts(accounts,
+                                    data["accounts"],
                                     data["currency_format"],
                                     result['server_knowledge'],
                                     first,
                                     triggers)
-    entity["categories"] = json.dumps(categories)
+        entity["accounts"] = json.dumps(accounts)
 
-    months = json.loads(entity["months"])
-    months = process_months(months,
-                            data["months"],
-                            data["first_month"],
-                            data["currency_format"],
-                            result['server_knowledge'],
-                            first,
-                            triggers)
-    entity["months"] = json.dumps(months)
-
-    month_categories = json.loads(entity["month_categories"])
-    month_categories = process_month_categories(month_categories,
-                                                categories,
-                                                data["months"],
-                                                data["first_month"],
-                                                data["currency_format"],
-                                                result['server_knowledge'],
-                                                first,
-                                                triggers)
-    entity["month_categories"] = json.dumps(month_categories)
-
-    payees = json.loads(entity["payees"])
-    payees = process_payees(payees,
-                            data["payees"],
-                            data["currency_format"],
-                            result['server_knowledge'],
-                            first,
-                            triggers)
-    entity["payees"] = json.dumps(payees)
-
-    transactions = json.loads(entity["transactions"])
-    transactions = process_transactions(transactions,
-                                        accounts,
-                                        categories,
-                                        payees,
-                                        data["transactions"],
+        categories = json.loads(entity["categories"])
+        categories = process_categories(accounts,
+                                        data["categories"],
+                                        data["category_groups"],
                                         data["currency_format"],
                                         result['server_knowledge'],
                                         first,
                                         triggers)
-    entity["transactions"] = json.dumps(transactions)
+        entity["categories"] = json.dumps(categories)
 
-    DSCLIENT.put(entity)
+        months = json.loads(entity["months"])
+        months = process_months(months,
+                                data["months"],
+                                data["first_month"],
+                                data["currency_format"],
+                                result['server_knowledge'],
+                                first,
+                                triggers)
+        entity["months"] = json.dumps(months)
+
+        month_categories = json.loads(entity["month_categories"])
+        month_categories = process_month_categories(month_categories,
+                                                    categories,
+                                                    data["months"],
+                                                    data["first_month"],
+                                                    data["currency_format"],
+                                                    result['server_knowledge'],
+                                                    first,
+                                                    triggers)
+        entity["month_categories"] = json.dumps(month_categories)
+
+        payees = json.loads(entity["payees"])
+        payees = process_payees(payees,
+                                data["payees"],
+                                data["currency_format"],
+                                result['server_knowledge'],
+                                first,
+                                triggers)
+        entity["payees"] = json.dumps(payees)
+
+        transactions = json.loads(entity["transactions"])
+        transactions = process_transactions(transactions,
+                                            accounts,
+                                            categories,
+                                            payees,
+                                            data["transactions"],
+                                            data["currency_format"],
+                                            result['server_knowledge'],
+                                            first,
+                                            triggers)
+        entity["transactions"] = json.dumps(transactions)
+
+        DSCLIENT.put(entity)
 
     if triggers:
         print("Updating triggers: " + json.dumps(triggers))
