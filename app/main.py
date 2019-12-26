@@ -1,5 +1,3 @@
-# pylint: disable=bare-except,global-statement
-
 """
 Main module serving the pages for the IFTTT2YNAB appengine app
 """
@@ -17,9 +15,7 @@ import requests
 from flask import Flask, redirect, render_template, request, make_response
 from google.cloud import datastore
 
-# pylint: disable=invalid-name
 app = Flask(__name__)
-# pylint: enable=invalid-name
 
 DSCLIENT = datastore.Client()
 
@@ -53,9 +49,28 @@ def ifttt_test_setup():
         "data": {
             "samples": {
                 "triggers": {
+                    "ynab_account_updated": {
+                        "budget": "TEST#TEST",
+                    },
+                    "ynab_category_updated": {
+                        "budget": "TEST#TEST",
+                    },
+                    "ynab_category_month_updated": {
+                        "budget": "TEST#TEST",
+                        "category": "TEST#TEST",
+                    },
+                    "ynab_category_month_updated_default": {
+                        "category": "TEST#TEST",
+                    },
                     "ynab_month_updated": {
-                        "budget": "TEST",
-                    }
+                        "budget": "TEST#TEST",
+                    },
+                    "ynab_payee_updated": {
+                        "budget": "TEST#TEST",
+                    },
+                    "ynab_transaction_updated": {
+                        "budget": "TEST#TEST",
+                    },
                 },
                 "actions": {
                     "ynab_create": {
@@ -170,7 +185,17 @@ def ifttt_test_setup():
            "budget/options", methods=["POST"])
 @app.route("/ifttt/v1/actions/ynab_adjust_balance/fields/"\
            "budget/options", methods=["POST"])
+@app.route("/ifttt/v1/triggers/ynab_account_updated/fields/"\
+           "budget/options", methods=["POST"])
+@app.route("/ifttt/v1/triggers/ynab_category_updated/fields/"\
+           "budget/options", methods=["POST"])
+@app.route("/ifttt/v1/triggers/ynab_category_month_updated/fields/"\
+           "budget/options", methods=["POST"])
 @app.route("/ifttt/v1/triggers/ynab_month_updated/fields/"\
+           "budget/options", methods=["POST"])
+@app.route("/ifttt/v1/triggers/ynab_payee_updated/fields/"\
+           "budget/options", methods=["POST"])
+@app.route("/ifttt/v1/triggers/ynab_transaction_updated/fields/"\
            "budget/options", methods=["POST"])
 def ifttt_budget_options():
     """ Option values for the budget field """
@@ -209,7 +234,15 @@ def ifttt_account_options():
            "category/options", methods=["POST"])
 @app.route("/ifttt/v1/actions/ynab_adjust_balance_default/fields/"\
            "category/options", methods=["POST"])
-def ifttt_category_options():
+def ifttt_category_options_false():
+    return ifttt_category_options(False)
+
+@app.route("/ifttt/v1/triggers/ynab_category_month_updated_default/fields/"\
+           "category/options", methods=["POST"])
+def ifttt_category_options_true():
+    return ifttt_category_options(True)
+
+def ifttt_category_options(trigger):
     """ Option values for the category field """
     if "IFTTT-Service-Key" not in request.headers or \
             request.headers["IFTTT-Service-Key"] != get_ifttt_key():
@@ -218,7 +251,7 @@ def ifttt_category_options():
         if get_default_budget() is None:
             return json.dumps({"data": [{"label": "ERROR no default budget",
                                          "value": ""}]})
-        data = get_ynab_categories()
+        data = get_ynab_categories(None, trigger)
         return json.dumps({"data": data})
     except:
         traceback.print_exc()
@@ -504,12 +537,330 @@ def ifttt_adjust_balance_action(default):
 
 
 ###############################################################################
+# IFTTT account is updated trigger                                            #
+###############################################################################
+
+@app.route("/ifttt/v1/triggers/ynab_account_updated", methods=["POST"])
+def ifttt_account_updated():
+    if "IFTTT-Service-Key" not in request.headers or \
+            request.headers["IFTTT-Service-Key"] != get_ifttt_key():
+        print("[account_updated] ERROR: invalid IFTTT service key!")
+        return json.dumps({"errors": [{"message": "Invalid key"}]}), 401
+
+    try:
+        data = request.get_json()
+        print("[account_updated] input: {}".format(json.dumps(data)))
+
+        if "triggerFields" not in data or\
+                "budget" not in data["triggerFields"]:
+            print("[account_updated] ERROR: budget field missing!")
+            return json.dumps({"errors": [{"message": "Invalid data"}]}), 400
+        budget = data["triggerFields"]["budget"]
+
+        if "trigger_identity" not in data:
+            print("[account_updated] ERROR: trigger_identity field missing!")
+            return json.dumps({"errors": [{"message": "Invalid data"}]}), 400
+        triggerid = data["trigger_identity"]
+
+        limit = 50
+        if "limit" in data:
+            limit = data["limit"]
+
+        timezone = "UTC"
+        if "user" in data and "timezone" in data["user"]:
+            timezone = data["user"]["timezone"]
+
+        if budget == "TEST#TEST":
+            results = ifttt_account_updated_test()
+        else:
+            entity = DSCLIENT.get(DSCLIENT.key("budget", budget))
+            if entity is None:
+                print("[account_updated] WARNING: unknown budget "+budget)
+                results = []
+            else:
+                data = json.loads(entity["accounts"])
+                if "triggers" not in data:
+                    triggers = []
+                else:
+                    triggers = data["triggers"]
+                if triggerid not in triggers:
+                    print("Adding new trigger: "+triggerid)
+                    triggers.append(triggerid)
+                    data["triggers"] = triggers
+                    entity["accounts"] = json.dumps(data)
+                    DSCLIENT.put(entity)
+
+                results = data["changed"]
+
+        for result in results:
+            result["created_at"] = arrow.get(result["created_at"])\
+                                   .to(timezone).isoformat()
+
+        print("[account_updated] Found {} updates".format(len(results)))
+        return json.dumps({"data": results[:limit]})
+
+    except:
+        traceback.print_exc()
+        print("[account_updated] ERROR: cannot retrieve transactions")
+        return json.dumps({"errors": [{"message": \
+                           "Cannot retrieve transactions"}]}), 400
+
+
+def ifttt_account_updated_test():
+    created = arrow.utcnow().isoformat()
+    stamp = arrow.utcnow().timestamp
+    item1 = {"created_at": created, "meta": {"id": "1", "timestamp": stamp}}
+    item2 = {"created_at": created, "meta": {"id": "2", "timestamp": stamp}}
+    item3 = {"created_at": created, "meta": {"id": "3", "timestamp": stamp}}
+    for item in [item1, item2, item3]:
+        item["change"] = "update"
+        item["name"] = "TEST_account"
+        item["type"] = "checking"
+        item["on_budget"] = True
+        item["closed"] = False
+        item["note"] = "TEST_note"
+        item["balance"] = "3.33"
+        item["cleared_balance"] = "2.22"
+        item["uncleared_balance"] = "1.11"
+    return [item1, item2, item3]
+
+
+###############################################################################
+# IFTTT category is updated trigger                                           #
+###############################################################################
+
+@app.route("/ifttt/v1/triggers/ynab_category_updated", methods=["POST"])
+def ifttt_category_updated():
+    if "IFTTT-Service-Key" not in request.headers or \
+            request.headers["IFTTT-Service-Key"] != get_ifttt_key():
+        print("[category_updated] ERROR: invalid IFTTT service key!")
+        return json.dumps({"errors": [{"message": "Invalid key"}]}), 401
+
+    try:
+        data = request.get_json()
+        print("[category_updated] input: {}".format(json.dumps(data)))
+
+        if "triggerFields" not in data or\
+                "budget" not in data["triggerFields"]:
+            print("[category_updated] ERROR: budget field missing!")
+            return json.dumps({"errors": [{"message": "Invalid data"}]}), 400
+        budget = data["triggerFields"]["budget"]
+
+        if "trigger_identity" not in data:
+            print("[category_updated] ERROR: trigger_identity field missing!")
+            return json.dumps({"errors": [{"message": "Invalid data"}]}), 400
+        triggerid = data["trigger_identity"]
+
+        limit = 50
+        if "limit" in data:
+            limit = data["limit"]
+
+        timezone = "UTC"
+        if "user" in data and "timezone" in data["user"]:
+            timezone = data["user"]["timezone"]
+
+        if budget == "TEST#TEST":
+            results = ifttt_category_updated_test()
+        else:
+            entity = DSCLIENT.get(DSCLIENT.key("budget", budget))
+            if entity is None:
+                print("[category_updated] WARNING: unknown budget "+budget)
+                results = []
+            else:
+                data = json.loads(entity["categories"])
+                if "triggers" not in data:
+                    triggers = []
+                else:
+                    triggers = data["triggers"]
+                if triggerid not in triggers:
+                    print("Adding new trigger: "+triggerid)
+                    triggers.append(triggerid)
+                    data["triggers"] = triggers
+                    entity["categories"] = json.dumps(data)
+                    DSCLIENT.put(entity)
+
+                results = data["changed"]
+
+        for result in results:
+            result["created_at"] = arrow.get(result["created_at"])\
+                                   .to(timezone).isoformat()
+
+        print("[category_updated] Found {} updates".format(len(results)))
+        return json.dumps({"data": results[:limit]})
+
+    except:
+        traceback.print_exc()
+        print("[category_updated] ERROR: cannot retrieve transactions")
+        return json.dumps({"errors": [{"message": \
+                           "Cannot retrieve transactions"}]}), 400
+
+
+def ifttt_category_updated_test():
+    created = arrow.utcnow().isoformat()
+    stamp = arrow.utcnow().timestamp
+    item1 = {"created_at": created, "meta": {"id": "1", "timestamp": stamp}}
+    item2 = {"created_at": created, "meta": {"id": "2", "timestamp": stamp}}
+    item3 = {"created_at": created, "meta": {"id": "3", "timestamp": stamp}}
+    for item in [item1, item2, item3]:
+        item["change"] = "update"
+        item["group"] = "TEST_group"
+        item["name"] = "TEST_category"
+        item["hidden"] = False
+        item["note"] = "TEST_note"
+        item["budgeted"] = "33.33"
+        item["activity"] = "22.22"
+        item["balance"] = "11.11"
+        item["goal_type"] = "TB"
+        item["goal_creation_month"] = "2099-01"
+        item["goal_target"] = "44.44"
+        item["goal_target_month"] = "2099-12"
+        item["goal_percentage_complete"] = "50"
+    return [item1, item2, item3]
+
+
+###############################################################################
+# IFTTT category month is updated trigger                                     #
+###############################################################################
+
+@app.route("/ifttt/v1/triggers/ynab_category_month_updated",
+           methods=["POST"])
+def ifttt_category_month_updated():
+    return ifttt_category_month_updated_implementation(False)
+
+@app.route("/ifttt/v1/triggers/ynab_category_month_updated_default",
+           methods=["POST"])
+def ifttt_category_month_updated_default():
+    return ifttt_category_month_updated_implementation(True)
+
+
+def ifttt_category_month_updated_implementation(default):
+    if "IFTTT-Service-Key" not in request.headers or \
+            request.headers["IFTTT-Service-Key"] != get_ifttt_key():
+        print("[cat_month_updated] ERROR: invalid IFTTT service key!")
+        return json.dumps({"errors": [{"message": "Invalid key"}]}), 401
+
+    try:
+        data = request.get_json()
+        print("[cat_month_updated] input: {}".format(json.dumps(data)))
+
+        if default:
+            budget = get_default_budget()
+        else:
+            if "triggerFields" not in data or\
+                    "budget" not in data["triggerFields"]:
+                print("[cat_month_updated] ERROR: budget field missing!")
+                return json.dumps({"errors": [{"message": "Invalid data"}]}),\
+                       400
+            budget = data["triggerFields"]["budget"]
+
+        if "triggerFields" not in data or\
+                "category" not in data["triggerFields"]:
+            print("[cat_month_updated] ERROR: category field missing!")
+            return json.dumps({"errors": [{"message": "Invalid data"}]}),\
+                   400
+        category = data["triggerFields"]["category"]
+
+        if "trigger_identity" not in data:
+            print("[cat_month_updated] ERROR: trigger_identity field missing!")
+            return json.dumps({"errors": [{"message": "Invalid data"}]}), 400
+        triggerid = data["trigger_identity"]
+
+        limit = 50
+        if "limit" in data:
+            limit = data["limit"]
+
+        timezone = "UTC"
+        if "user" in data and "timezone" in data["user"]:
+            timezone = data["user"]["timezone"]
+
+        if category == "TEST#TEST":
+            results = ifttt_category_month_updated_test()
+        else:
+            entity = DSCLIENT.get(DSCLIENT.key("budget", budget))
+            if entity is None:
+                print("[cat_month_updated] WARNING: unknown budget "+budget)
+                results = []
+            else:
+                cats = json.loads(entity["categories"])
+                if category != "":
+                    if category not in cats["data"]:
+                        for cat in cats["data"]:
+                            catdata = cats["data"][cat]
+                            if category == catdata[1] + " - " + catdata[0]:
+                                category = cat
+                    if category not in cats["data"]:
+                        for cat in cats["data"]:
+                            if category == cats["data"][cat][0]:
+                                category = cat
+                    if category not in cats["data"]:
+                        print("[cat_month_updated] ERROR: category not found!")
+                        return json.dumps({"errors": [{"message":\
+                                        "Invalid data"}]}), 400
+
+                data = json.loads(entity["month_categories"])
+                if "triggers" not in data:
+                    triggers = []
+                else:
+                    triggers = data["triggers"]
+                if triggerid not in triggers:
+                    print("Adding new trigger: "+triggerid)
+                    triggers.append(triggerid)
+                    data["triggers"] = triggers
+                    entity["month_categories"] = json.dumps(data)
+                    DSCLIENT.put(entity)
+
+                if category == "":
+                    results = data["changed"]
+                else:
+                    results = []
+                    for change in data["changed"]:
+                        if change["category_id"] == category:
+                            results.append(change)
+
+        for result in results:
+            result["created_at"] = arrow.get(result["created_at"])\
+                                   .to(timezone).isoformat()
+
+        print("[cat_month_updated] Found {} updates".format(len(results)))
+        return json.dumps({"data": results[:limit]})
+
+    except:
+        traceback.print_exc()
+        print("[cat_month_updated] ERROR: cannot retrieve transactions")
+        return json.dumps({"errors": [{"message": \
+                           "Cannot retrieve transactions"}]}), 400
+
+
+def ifttt_category_month_updated_test():
+    created = arrow.utcnow().isoformat()
+    stamp = arrow.utcnow().timestamp
+    item1 = {"created_at": created, "meta": {"id": "1", "timestamp": stamp}}
+    item2 = {"created_at": created, "meta": {"id": "2", "timestamp": stamp}}
+    item3 = {"created_at": created, "meta": {"id": "3", "timestamp": stamp}}
+    for item in [item1, item2, item3]:
+        item["month"] = "2020-01"
+        item["relative_index"] = 2
+        item["group"] = "TEST_group"
+        item["name"] = "TEST_category"
+        item["hidden"] = False
+        item["note"] = "TEST_note"
+        item["budgeted"] = "33.33"
+        item["activity"] = "22.22"
+        item["balance"] = "11.11"
+        item["goal_type"] = "TB"
+        item["goal_creation_month"] = "2099-01"
+        item["goal_target"] = "44.44"
+        item["goal_target_month"] = "2099-12"
+        item["goal_percentage_complete"] = "50"
+    return [item1, item2, item3]
+
+
+###############################################################################
 # IFTTT month is updated trigger                                              #
 ###############################################################################
 
 @app.route("/ifttt/v1/triggers/ynab_month_updated", methods=["POST"])
 def ifttt_month_updated():
-    """ Option values for the budget field """
     if "IFTTT-Service-Key" not in request.headers or \
             request.headers["IFTTT-Service-Key"] != get_ifttt_key():
         print("[month_updated] ERROR: invalid IFTTT service key!")
@@ -525,12 +876,6 @@ def ifttt_month_updated():
             return json.dumps({"errors": [{"message": "Invalid data"}]}), 400
         budget = data["triggerFields"]["budget"]
 
-        if budget == "TEST":
-            budget = get_default_budget()
-            if budget is None:
-                print("[month_updated] ERROR: default budget not set!")
-                return json.dumps({"errors": [{"message": "No default"}]}), 400
-
         if "trigger_identity" not in data:
             print("[month_updated] ERROR: trigger_identity field missing!")
             return json.dumps({"errors": [{"message": "Invalid data"}]}), 400
@@ -544,39 +889,30 @@ def ifttt_month_updated():
         if "user" in data and "timezone" in data["user"]:
             timezone = data["user"]["timezone"]
 
-        entity = DSCLIENT.get(DSCLIENT.key("budget", budget))
-        if entity is None:
-            print("[month_updated] WARNING: budget not found "+budget)
-            results = []
+        if budget == "TEST#TEST":
+            results = ifttt_month_updated_test()
         else:
-            months = json.loads(entity["months"])
-            if "triggers" not in months:
-                triggers = []
+            entity = DSCLIENT.get(DSCLIENT.key("budget", budget))
+            if entity is None:
+                print("[month_updated] WARNING: unknown budget "+budget)
+                results = []
             else:
-                triggers = months["triggers"]
-            if triggerid not in triggers:
-                print(triggers)
-                print("Adding new trigger: "+triggerid)
-                triggers.append(triggerid)
-                months["triggers"] = triggers
-                entity["months"] = json.dumps(months)
-                DSCLIENT.put(entity)
-
+                months = json.loads(entity["months"])
+                if "triggers" not in months:
+                    triggers = []
+                else:
+                    triggers = months["triggers"]
+                if triggerid not in triggers:
+                    print("Adding new trigger: "+triggerid)
+                    triggers.append(triggerid)
+                    months["triggers"] = triggers
+                    entity["months"] = json.dumps(months)
+                    DSCLIENT.put(entity)
             results = months["changed"]
-            for result in results:
-                result["created_at"] = arrow.get(result["created_at"])\
-                                       .to(timezone).isoformat()
 
-        # ensure at least three updates when testing
-        if data["triggerFields"]["budget"] == "TEST" and len(results) < 3:
-            update1 = results[0].copy()
-            update1["meta"] = update1["meta"].copy()
-            update1["meta"]["id"] = "1_" + update1["meta"]["id"]
-            update2 = results[0].copy()
-            update2["meta"] = update2["meta"].copy()
-            update2["meta"]["id"] = "2_" + update2["meta"]["id"]
-            results.append(update1)
-            results.append(update2)
+        for result in results:
+            result["created_at"] = arrow.get(result["created_at"])\
+                                    .to(timezone).isoformat()
 
         print("[month_updated] Found {} updates"
               .format(len(results)))
@@ -588,26 +924,235 @@ def ifttt_month_updated():
         return json.dumps({"errors": [{"message": \
                            "Cannot retrieve transactions"}]}), 400
 
-@app.route("/ifttt/v1/triggers/ynab_month_updated/trigger_identity/" +
-           "<triggerid>", methods=["DELETE"])
-def ifttt_month_updated_delete_trigger(triggerid):
-    budget = get_default_budget()
-    entity = DSCLIENT.get(DSCLIENT.key("budget", budget))
-    if entity is not None:
-        for typ in ['accounts', 'categories', 'months', 'month_categories',
-                    'payees', 'transactions']:
-            data = entity[typ]
-            if data is not None:
-                data = json.loads(data)
-                if "triggers" in data:
-                    if triggerid in data["triggers"]:
-                        newtriggers = []
-                        for trig in data["triggers"]:
-                            if trig != triggerid:
-                                newtriggers.append(trig)
-                        data["triggers"] = newtriggers
-                        entity[typ] = json.dumps(data)
-                        DSCLIENT.put(entity)
+
+def ifttt_month_updated_test():
+    created = arrow.utcnow().isoformat()
+    stamp = arrow.utcnow().timestamp
+    item1 = {"created_at": created, "meta": {"id": "1", "timestamp": stamp}}
+    item2 = {"created_at": created, "meta": {"id": "2", "timestamp": stamp}}
+    item3 = {"created_at": created, "meta": {"id": "3", "timestamp": stamp}}
+    for item in [item1, item2, item3]:
+        item["month"] = "2099-12"
+        item["relative_index"] = 42
+        item["income"] = "1234.56"
+        item["budgeted"] = "1234.56"
+        item["activity"] = "1234.56"
+        item["to_be_budgeted"] = "1234.56"
+        item["age_of_money"] = "60"
+    return [item1, item2, item3]
+
+
+###############################################################################
+# IFTTT payee is updated trigger                                              #
+###############################################################################
+
+@app.route("/ifttt/v1/triggers/ynab_payee_updated", methods=["POST"])
+def ifttt_payee_updated():
+    if "IFTTT-Service-Key" not in request.headers or \
+            request.headers["IFTTT-Service-Key"] != get_ifttt_key():
+        print("[payee_updated] ERROR: invalid IFTTT service key!")
+        return json.dumps({"errors": [{"message": "Invalid key"}]}), 401
+
+    try:
+        data = request.get_json()
+        print("[payee_updated] input: {}".format(json.dumps(data)))
+
+        if "triggerFields" not in data or\
+                "budget" not in data["triggerFields"]:
+            print("[payee_updated] ERROR: budget field missing!")
+            return json.dumps({"errors": [{"message": "Invalid data"}]}), 400
+        budget = data["triggerFields"]["budget"]
+
+        if "trigger_identity" not in data:
+            print("[payee_updated] ERROR: trigger_identity field missing!")
+            return json.dumps({"errors": [{"message": "Invalid data"}]}), 400
+        triggerid = data["trigger_identity"]
+
+        limit = 50
+        if "limit" in data:
+            limit = data["limit"]
+
+        timezone = "UTC"
+        if "user" in data and "timezone" in data["user"]:
+            timezone = data["user"]["timezone"]
+
+        if budget == "TEST#TEST":
+            results = ifttt_payee_updated_test()
+        else:
+            entity = DSCLIENT.get(DSCLIENT.key("budget", budget))
+            if entity is None:
+                print("[payee_updated] WARNING: unknown budget "+budget)
+                results = []
+            else:
+                data = json.loads(entity["payees"])
+                if "triggers" not in data:
+                    triggers = []
+                else:
+                    triggers = data["triggers"]
+                if triggerid not in triggers:
+                    print("Adding new trigger: "+triggerid)
+                    triggers.append(triggerid)
+                    data["triggers"] = triggers
+                    entity["payees"] = json.dumps(data)
+                    DSCLIENT.put(entity)
+
+                results = data["changed"]
+
+        for result in results:
+            result["created_at"] = arrow.get(result["created_at"])\
+                                   .to(timezone).isoformat()
+
+        print("[payee_updated] Found {} updates".format(len(results)))
+        return json.dumps({"data": results[:limit]})
+
+    except:
+        traceback.print_exc()
+        print("[payee_updated] ERROR: cannot retrieve transactions")
+        return json.dumps({"errors": [{"message": \
+                           "Cannot retrieve transactions"}]}), 400
+
+
+def ifttt_payee_updated_test():
+    created = arrow.utcnow().isoformat()
+    stamp = arrow.utcnow().timestamp
+    item1 = {"created_at": created, "meta": {"id": "1", "timestamp": stamp}}
+    item2 = {"created_at": created, "meta": {"id": "2", "timestamp": stamp}}
+    item3 = {"created_at": created, "meta": {"id": "3", "timestamp": stamp}}
+    for item in [item1, item2, item3]:
+        item["change"] = "update"
+        item["name"] = "TEST_payee"
+    return [item1, item2, item3]
+
+
+###############################################################################
+# IFTTT transaction is updated trigger                                        #
+###############################################################################
+
+@app.route("/ifttt/v1/triggers/ynab_transaction_updated", methods=["POST"])
+def ifttt_transaction_updated():
+    if "IFTTT-Service-Key" not in request.headers or \
+            request.headers["IFTTT-Service-Key"] != get_ifttt_key():
+        print("[transaction_updated] ERROR: invalid IFTTT service key!")
+        return json.dumps({"errors": [{"message": "Invalid key"}]}), 401
+
+    try:
+        data = request.get_json()
+        print("[transaction_updated] input: {}".format(json.dumps(data)))
+
+        if "triggerFields" not in data or\
+                "budget" not in data["triggerFields"]:
+            print("[transaction_updated] ERROR: budget field missing!")
+            return json.dumps({"errors": [{"message": "Invalid data"}]}), 400
+        budget = data["triggerFields"]["budget"]
+
+        if "trigger_identity" not in data:
+            print("[transaction_updated] ERROR: trigger_identity field missing!")
+            return json.dumps({"errors": [{"message": "Invalid data"}]}), 400
+        triggerid = data["trigger_identity"]
+
+        limit = 50
+        if "limit" in data:
+            limit = data["limit"]
+
+        timezone = "UTC"
+        if "user" in data and "timezone" in data["user"]:
+            timezone = data["user"]["timezone"]
+
+        if budget == "TEST#TEST":
+            results = ifttt_transaction_updated_test()
+        else:
+            entity = DSCLIENT.get(DSCLIENT.key("budget", budget))
+            if entity is None:
+                print("[transaction_updated] WARNING: unknown budget "+budget)
+                results = []
+            else:
+                data = json.loads(entity["transactions"])
+                if "triggers" not in data:
+                    triggers = []
+                else:
+                    triggers = data["triggers"]
+                if triggerid not in triggers:
+                    print("Adding new trigger: "+triggerid)
+                    triggers.append(triggerid)
+                    data["triggers"] = triggers
+                    entity["transactions"] = json.dumps(data)
+                    DSCLIENT.put(entity)
+
+                results = data["changed"]
+
+        for result in results:
+            result["created_at"] = arrow.get(result["created_at"])\
+                                   .to(timezone).isoformat()
+
+        print("[transaction_updated] Found {} updates".format(len(results)))
+        return json.dumps({"data": results[:limit]})
+
+    except:
+        traceback.print_exc()
+        print("[transaction_updated] ERROR: cannot retrieve transactions")
+        return json.dumps({"errors": [{"message": \
+                           "Cannot retrieve transactions"}]}), 400
+
+
+def ifttt_transaction_updated_test():
+    created = arrow.utcnow().isoformat()
+    stamp = arrow.utcnow().timestamp
+    item1 = {"created_at": created, "meta": {"id": "1", "timestamp": stamp}}
+    item2 = {"created_at": created, "meta": {"id": "2", "timestamp": stamp}}
+    item3 = {"created_at": created, "meta": {"id": "3", "timestamp": stamp}}
+    for item in [item1, item2, item3]:
+        item["change"] = "update"
+        item["date"] = "2020-12-31"
+        item["amount"] = 12.34
+        item["memo"] = "Foo bar"
+        item["cleared"] = "cleared"
+        item["approved"] = True
+        item["flag_color"] = "red"
+        item["account"] = "Piggy bank"
+        item["payee"] = "Acme Market"
+        item["category"] = "Supermarket"
+        item["category_group"] = "Personal expenses"
+        item["transfer_account"] = ""
+    return [item1, item2, item3]
+
+
+###############################################################################
+# IFTTT delete trigger method                                                 #
+###############################################################################
+
+@app.route("/ifttt/v1/triggers/ynab_account_updated/" +
+           "trigger_identity/<triggerid>", methods=["DELETE"])
+@app.route("/ifttt/v1/triggers/ynab_category_updated/" +
+           "trigger_identity/<triggerid>", methods=["DELETE"])
+@app.route("/ifttt/v1/triggers/ynab_category_month_updated/" +
+           "trigger_identity/<triggerid>", methods=["DELETE"])
+@app.route("/ifttt/v1/triggers/ynab_category_month_updated_default/" +
+           "trigger_identity/<triggerid>", methods=["DELETE"])
+@app.route("/ifttt/v1/triggers/ynab_month_updated/" +
+           "trigger_identity/<triggerid>", methods=["DELETE"])
+@app.route("/ifttt/v1/triggers/ynab_payee_updated/" +
+           "trigger_identity/<triggerid>", methods=["DELETE"])
+@app.route("/ifttt/v1/triggers/ynab_transaction_updated/" +
+           "trigger_identity/<triggerid>", methods=["DELETE"])
+def ifttt_delete_trigger(triggerid):
+    budgets = get_ynab_budgets()
+    for budget in [b["value"] for b in budgets]:
+        entity = DSCLIENT.get(DSCLIENT.key("budget", budget))
+        if entity is not None:
+            for typ in ['accounts', 'categories', 'months', 'month_categories',
+                        'payees', 'transactions']:
+                data = entity[typ]
+                if data is not None:
+                    data = json.loads(data)
+                    if "triggers" in data:
+                        if triggerid in data["triggers"]:
+                            newtriggers = []
+                            for trig in data["triggers"]:
+                                if trig != triggerid:
+                                    newtriggers.append(trig)
+                            data["triggers"] = newtriggers
+                            entity[typ] = json.dumps(data)
+                            DSCLIENT.put(entity)
 
 
 ###############################################################################
@@ -624,9 +1169,9 @@ def cron():
         entity = DSCLIENT.get(DSCLIENT.key("budget", budget))
         if entity is None:
             entity = datastore.Entity(DSCLIENT.key("budget", budget),\
-                    exclude_from_indexes=['config', 'accounts', 'categories',
-                                        'months', 'month_categories',
-                                        'payees', 'transactions'])
+                     exclude_from_indexes=['config', 'accounts', 'categories',
+                                           'months', 'month_categories',
+                                           'payees', 'transactions'])
             entity['accounts'] = json.dumps({})
             entity['categories'] = json.dumps({})
             entity['months'] = json.dumps({})
@@ -664,7 +1209,7 @@ def cron():
         entity["accounts"] = json.dumps(accounts)
 
         categories = json.loads(entity["categories"])
-        categories = process_categories(accounts,
+        categories = process_categories(categories,
                                         data["categories"],
                                         data["category_groups"],
                                         data["currency_format"],
@@ -697,7 +1242,6 @@ def cron():
         payees = json.loads(entity["payees"])
         payees = process_payees(payees,
                                 data["payees"],
-                                data["currency_format"],
                                 result['server_knowledge'],
                                 first,
                                 triggers)
@@ -715,6 +1259,13 @@ def cron():
                                             triggers)
         entity["transactions"] = json.dumps(transactions)
 
+        print(data["name"] + " size = " + str(len(entity["config"]) +
+                                              len(entity["accounts"]) +
+                                              len(entity["categories"]) +
+                                              len(entity["months"]) +
+                                              len(entity["month_categories"]) +
+                                              len(entity["payees"]) +
+                                              len(entity["transactions"])))
         DSCLIENT.put(entity)
 
     if triggers:
@@ -733,29 +1284,156 @@ def cron():
         print(res.text)
 
     return ""
-    #return json.dumps({
-    #    "config": config,
-    #    "accounts": accounts,
-    #    "categories": categories,
-    #    "month_categories": month_categories,
-    #    "months": months,
-    #    "payees": payees,
-    #    "transactions": transactions,
-    #    "data": result
-    #})
 
 def process_accounts(old, data, curfmt, knowledge, first, triggers):
-    return []
+    if first:
+        result = {"changed": [], "data": {}}
+    else:
+        result = old
+
+    now = arrow.utcnow()
+
+    for item in data:
+
+        fieldhash = hashlib.md5("{}|{}|{}|{}|{}|{}|{}|{}".format(
+            item["name"],
+            item["type"],
+            item["on_budget"],
+            item["closed"],
+            item["note"],
+            item["balance"],
+            item["cleared_balance"],
+            item["uncleared_balance"],
+        ).encode("utf-8")).hexdigest()[:8]
+
+        if item["deleted"]:
+            change_type = "delete"
+            if item["id"] in result["data"]:
+                del result["data"][item["id"]]
+        else:
+            if item["id"] in result["data"]:
+                if result["data"][item["id"]][1] != fieldhash:
+                    change_type = "update"
+                else:
+                    change_type = None
+            else:
+                change_type = "new"
+            result["data"][item["id"]] = [item["name"], fieldhash]
+
+        if not first and change_type is not None:
+            change = {
+                "created_at": now.isoformat(),
+                "change": change_type,
+                "name": item["name"],
+                "type": item["type"],
+                "on_budget": item["on_budget"],
+                "closed": item["closed"],
+                "note": item["note"],
+                "balance": convert_amount(item["balance"], curfmt),
+                "cleared_balance": convert_amount(item["cleared_balance"],
+                                                  curfmt),
+                "uncleared_balance": convert_amount(item["uncleared_balance"],
+                                                    curfmt),
+                "meta": {
+                    "id": item["id"] + "_" + str(knowledge),
+                    "timestamp": now.timestamp
+                }
+            }
+            result["changed"].insert(0, change)
+
+    if data and "triggers" in result:
+        for trig in result["triggers"]:
+            triggers.append(trig)
+
+    return cleanup_old(result, now)
 
 def process_categories(old, data, groupdata, curfmt, knowledge, first,
                        triggers):
-    return []
-
-def process_months(old, data, first_month, curfmt, knowledge, first, triggers):
-    if not old or "changed" not in old:
-        result = {"changed": []}
+    if first:
+        result = {"changed": [], "data": {}, "groups": {}}
     else:
         result = old
+
+    now = arrow.utcnow()
+
+    for item in groupdata:
+        if item["deleted"]:
+            if item["id"] in result["groups"]:
+                del result["groups"][item["id"]]
+        else:
+            result["groups"][item["id"]] = item["name"]
+
+    for item in data:
+        group = ""
+        if item["category_group_id"] in result["groups"]:
+            group = result["groups"][item["category_group_id"]]
+        elif not item["deleted"]:
+            print("Error: group not found: "+item["category_group_id"])
+
+        fieldhash = hashlib.md5("{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}".format(
+            item["category_group_id"],
+            item["name"],
+            item["hidden"],
+            item["note"],
+            item["budgeted"],
+            item["activity"],
+            item["balance"],
+            item["goal_type"],
+            item["goal_creation_month"],
+            item["goal_target"],
+            item["goal_target_month"],
+            item["goal_percentage_complete"],
+        ).encode("utf-8")).hexdigest()[:8]
+
+        if item["deleted"]:
+            change_type = "delete"
+            if item["id"] in result["data"]:
+                del result["data"][item["id"]]
+        else:
+            if item["id"] in result["data"]:
+                if result["data"][item["id"]][2] != fieldhash:
+                    change_type = "update"
+                else:
+                    change_type = None
+            else:
+                change_type = "new"
+            result["data"][item["id"]] = [item["name"], group, fieldhash]
+
+        if not first and change_type is not None:
+            change = {
+                "category_id": item["id"],
+                "created_at": now.isoformat(),
+                "change": change_type,
+                "group": group,
+                "name": item["name"],
+                "hidden": item["hidden"],
+                "note": item["note"],
+                "budgeted": convert_amount(item["budgeted"], curfmt),
+                "activity": convert_amount(item["activity"], curfmt),
+                "balance": convert_amount(item["balance"], curfmt),
+                "goal_type": item["goal_type"],
+                "goal_creation_month": item["goal_creation_month"],
+                "goal_target": convert_amount(item["goal_target"], curfmt),
+                "goal_target_month": item["goal_target_month"],
+                "goal_percentage_complete": item["goal_percentage_complete"],
+                "meta": {
+                    "id": item["id"] + "_" + str(knowledge),
+                    "timestamp": now.timestamp
+                }
+            }
+            result["changed"].insert(0, change)
+
+    if data and "triggers" in result:
+        for trig in result["triggers"]:
+            triggers.append(trig)
+
+    return cleanup_old(result, now)
+
+def process_months(old, data, first_month, curfmt, knowledge, first, triggers):
+    if first:
+        # for months we only keep changes, so no need to process further
+        return {"changed": []}
+    result = old
 
     now = arrow.utcnow()
 
@@ -786,42 +1464,199 @@ def process_months(old, data, first_month, curfmt, knowledge, first, triggers):
         for trig in result["triggers"]:
             triggers.append(trig)
 
-    # only keep records younger than 1 day
-    result2 = {"changed": [], "triggers": []}
-    if "triggers" in result:
-        result2["triggers"] = result["triggers"]
-    if not first: # do not keep anything on first run
-        for change in result["changed"]:
-            if change["meta"]["timestamp"] > now.timestamp - 86400:
-                result2["changed"].append(change)
-    # but never delete the last record
-    if not result2["changed"] and result["changed"]:
-        result2["changed"].append(result["changed"][0])
-
-    return result2
+    return cleanup_old(result, now)
 
 def process_month_categories(old, categories, data, first_month, curfmt,
                              knowledge, first, triggers):
-    return []
+    if first:
+        # for months we only keep changes, so no need to process further
+        return {"changed": []}
+    result = old
 
-def process_payees(old, data, curfmt, knowledge, first, triggers):
-    return []
+    now = arrow.utcnow()
+
+    for month in data:
+        date = arrow.get(first_month)
+        target = arrow.get(month["month"])
+        index = 1
+        while date < target:
+            index += 1
+            date = date.shift(months=1)
+
+        for item in month["categories"]:
+            group = ""
+            if item["category_group_id"] in categories["groups"]:
+                group = categories["groups"][item["category_group_id"]]
+            elif not item["deleted"]:
+                print("Error: group not found: "+item["category_group_id"])
+
+            if not item["deleted"]:
+                change = {
+                    "category_id": item["id"],
+                    "created_at": now.isoformat(),
+                    "month": month["month"][:7],
+                    "relative_index": index,
+                    "group": group,
+                    "name": item["name"],
+                    "hidden": item["hidden"],
+                    "note": item["note"],
+                    "budgeted": convert_amount(item["budgeted"], curfmt),
+                    "activity": convert_amount(item["activity"], curfmt),
+                    "balance": convert_amount(item["balance"], curfmt),
+                    "goal_type": item["goal_type"],
+                    "goal_creation_month": item["goal_creation_month"],
+                    "goal_target": convert_amount(item["goal_target"], curfmt),
+                    "goal_target_month": item["goal_target_month"],
+                    "goal_percentage_complete": \
+                        item["goal_percentage_complete"],
+                    "meta": {
+                        "id": item["id"] + "_" + str(knowledge),
+                        "timestamp": now.timestamp
+                    }
+                }
+                result["changed"].insert(0, change)
+
+    if data and "triggers" in result:
+        for trig in result["triggers"]:
+            triggers.append(trig)
+
+    return cleanup_old(result, now)
+
+def process_payees(old, data, knowledge, first, triggers):
+    if first:
+        result = {"changed": [], "data": {}}
+    else:
+        result = old
+
+    now = arrow.utcnow()
+
+    for item in data:
+
+        if item["deleted"]:
+            change_type = "delete"
+            if item["id"] in result["data"]:
+                del result["data"][item["id"]]
+        else:
+            if item["id"] in result["data"]:
+                if result["data"][item["id"]] != item["name"]:
+                    change_type = "update"
+                else:
+                    change_type = None
+            else:
+                change_type = "new"
+            result["data"][item["id"]] = item["name"]
+
+        if not first and change_type is not None:
+            change = {
+                "created_at": now.isoformat(),
+                "change": change_type,
+                "name": item["name"],
+                "meta": {
+                    "id": item["id"] + "_" + str(knowledge),
+                    "timestamp": now.timestamp
+                }
+            }
+            result["changed"].insert(0, change)
+
+    if data and "triggers" in result:
+        for trig in result["triggers"]:
+            triggers.append(trig)
+
+    return cleanup_old(result, now)
 
 def process_transactions(old, accounts, categories, payees, data, curfmt,
                          knowledge, first, triggers):
-    return []
+    if first:
+        result = {"changed": []}
+        return result
+
+    result = old
+    now = arrow.utcnow()
+
+    for item in data:
+
+        if item["deleted"]:
+            change_type = "delete"
+            if item["id"] in result["data"]:
+                result["data"].remove(item["id"])
+        else:
+            if item["id"] in result["data"]:
+                change_type = "update"
+            else:
+                change_type = "new"
+                result["data"].append(item["id"])
+
+        payee = None
+        if item["payee_id"] in payees["data"]:
+            payee = payees["data"][item["payee_id"]]
+        account = None
+        if item["account_id"] in accounts["data"]:
+            account = accounts["data"][item["account_id"]][0]
+        transfer_account = None
+        if item["transfer_account_id"] in accounts["data"]:
+            transfer_account = accounts["data"][item["transfer_account_id"]][0]
+        category = None
+        category_group = None
+        if item["category_id"] in categories["data"]:
+            category = categories["data"][item["category_id"]][0]
+            category_group = categories["data"][item["category_id"]][1]
+        print(payee, account, transfer_account, category, category_group)
+
+        if not first and change_type is not None:
+            change = {
+                "created_at": now.isoformat(),
+                "change": change_type,
+                "date": item["date"],
+                "amount": convert_amount(item["amount"], curfmt),
+                "memo": item["memo"],
+                "cleared": item["cleared"],
+                "approved": item["approved"],
+                "flag_color": item["flag_color"],
+                "account": account,
+                "payee": payee,
+                "category": category,
+                "category_group": category_group,
+                "transfer_account": transfer_account,
+                "meta": {
+                    "id": item["id"] + "_" + str(knowledge),
+                    "timestamp": now.timestamp
+                }
+            }
+            result["changed"].insert(0, change)
+
+    if data and "triggers" in result:
+        for trig in result["triggers"]:
+            triggers.append(trig)
+
+    return cleanup_old(result, now)
 
 def convert_amount(amount, curfmt):
     digits = curfmt["decimal_digits"]
     if digits == 0:
         return "{}".format(amount // 1000)
-    elif digits == 1:
+    if digits == 1:
         return "{:.1f}".format((amount // 100) / 10)
-    elif digits == 2:
+    if digits == 2:
         return "{:.2f}".format((amount // 10) / 100)
-    else:
-        return "{:.3f}".format(amount / 1000)
+    return "{:.3f}".format(amount / 1000)
 
+def cleanup_old(result, now):
+    result2 = {"changed": [], "triggers": []}
+    if "triggers" in result:
+        result2["triggers"] = result["triggers"]
+    if "data" in result:
+        result2["data"] = result["data"]
+    if "groups" in result:
+        result2["groups"] = result["groups"]
+    # only keep records younger than 1 day
+    for change in result["changed"]:
+        if change["meta"]["timestamp"] > now.timestamp - 86400:
+            result2["changed"].append(change)
+    # but always keep the last record
+    if not result2["changed"] and result["changed"]:
+        result2["changed"].append(result["changed"][0])
+
+    return result2
 
 def get_ynab_budgets():
     data = []
@@ -863,13 +1698,16 @@ def get_ynab_accounts(budget=None):
         {"label": "Closed", "values": data3},
     ]
 
-def get_ynab_categories(budget=None):
+def get_ynab_categories(budget=None, trigger=False):
     if budget is None:
         budget = get_default_budget()
     r = requests.get(YNAB_BASE + "/budgets/{}/categories".format(budget), \
         headers={"Authorization": "Bearer {}".format(get_ynab_key())})
     results = r.json()["data"]["category_groups"]
-    data = [{"label": "(automatic)", "value": ""}]
+    if trigger:
+        data = [{"label": "(all categories)", "value": ""}]
+    else:
+        data = [{"label": "(automatic)", "value": ""}]
     for g in results:
         groupvalues = []
         for c in g["categories"]:
