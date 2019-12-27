@@ -1159,12 +1159,39 @@ def ifttt_delete_trigger(triggerid):
 # YNAB interface methods                                                      #
 ###############################################################################
 
+YNAB_BUDGETS = []
+
 @app.route("/cron/ynab", methods=["GET"])
 def cron():
-    triggers = []
-    budgets = get_ynab_budgets()
+    global YNAB_BUDGETS
+    if not YNAB_BUDGETS:
+        entity = DSCLIENT.get(DSCLIENT.key("budget", "budgets"))
+        if entity is not None:
+            YNAB_BUDGETS = json.loads(entity["data"])
+        else:
+            entity = datastore.Entity(DSCLIENT.key("budget", "budgets"))
 
-    for budget in [b["value"] for b in budgets]:
+    budgets = get_ynab_budgets_raw()
+    to_process = []
+    for a in budgets:
+        changed = False
+        found = False
+        for b in YNAB_BUDGETS:
+            if a['id'] == b['id']:
+                found = True
+                if a['last_modified_on'] != b['last_modified_on']:
+                    changed = True
+        if changed or not found:
+            to_process.append(a['id'])
+
+    YNAB_BUDGETS = budgets
+    print(to_process)
+    if to_process:
+        entity["data"] = json.dumps(YNAB_BUDGETS)
+        DSCLIENT.put(entity)
+
+    triggers = []
+    for budget in to_process:
 
         entity = DSCLIENT.get(DSCLIENT.key("budget", budget))
         if entity is None:
@@ -1600,7 +1627,6 @@ def process_transactions(old, accounts, categories, payees, data, curfmt,
         if item["category_id"] in categories["data"]:
             category = categories["data"][item["category_id"]][0]
             category_group = categories["data"][item["category_id"]][1]
-        print(payee, account, transfer_account, category, category_group)
 
         if not first and change_type is not None:
             change = {
@@ -1658,16 +1684,21 @@ def cleanup_old(result, now):
 
     return result2
 
-def get_ynab_budgets():
-    data = []
+def get_ynab_budgets_raw():
+    budgets = []
     if get_ynab_key() is not None:
         r = requests.get(YNAB_BASE + "/budgets", \
             headers={"Authorization": "Bearer {}".format(get_ynab_key())})
         budgets = r.json()["data"]["budgets"]
         budgets = sorted(budgets, key=lambda x: x["last_modified_on"],
                          reverse=True)
-        for b in budgets:
-            data.append({"label": b["name"], "value": b["id"]})
+    return budgets
+
+def get_ynab_budgets():
+    data = []
+    budgets = get_ynab_budgets_raw()
+    for b in budgets:
+        data.append({"label": b["name"], "value": b["id"]})
     return data
 
 def get_ynab_accounts(budget=None):
