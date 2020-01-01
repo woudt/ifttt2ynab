@@ -1596,7 +1596,7 @@ def process_payees(old, data, knowledge, first, triggers):
 def process_transactions(old, accounts, categories, payees, data, curfmt,
                          knowledge, first, triggers):
     if first:
-        result = {"changed": []}
+        result = {"changed": [], "data": []}
         return result
 
     result = old
