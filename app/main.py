@@ -1187,7 +1187,8 @@ def cron():
     YNAB_BUDGETS = budgets
     print(to_process)
     if to_process:
-        entity = datastore.Entity(DSCLIENT.key("budget", "budgets"))
+        entity = datastore.Entity(DSCLIENT.key("budget", "budgets"),
+                                  exclude_from_indexes=["data"])
         entity["data"] = json.dumps(YNAB_BUDGETS)
         DSCLIENT.put(entity)
 
