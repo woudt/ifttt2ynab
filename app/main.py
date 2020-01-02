@@ -341,8 +341,11 @@ def ifttt_create_action(default):
             print("[create_action] WARNING: unknown category, ignored")
 
     try:
-        if fields["date"] == "":
+        if fields["date"] in ["", "today"]:
             date = arrow.now(data["user"]["timezone"]).format("YYYY-MM-DD")
+        elif fields["date"] == "yesterday":
+            date = arrow.now(data["user"]["timezone"]).shift(days=-1)\
+                                                      .format("YYYY-MM-DD")
         else:
             date = arrow.get(fields["date"]).format("YYYY-MM-DD")
     except:
@@ -481,8 +484,11 @@ def ifttt_adjust_balance_action(default):
             print("[adjust_balance_action] WARNING: unknown category, ignored")
 
     try:
-        if fields["date"] == "":
+        if fields["date"] in ["", "today"]:
             date = arrow.now(data["user"]["timezone"]).format("YYYY-MM-DD")
+        elif fields["date"] == "yesterday":
+            date = arrow.now(data["user"]["timezone"]).shift(days=-1)\
+                                                      .format("YYYY-MM-DD")
         else:
             date = arrow.get(fields["date"]).format("YYYY-MM-DD")
     except:
