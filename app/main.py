@@ -1169,6 +1169,7 @@ YNAB_BUDGETS = []
 
 @app.route("/cron/ynab", methods=["GET"])
 def cron():
+    now = arrow.now()
     global YNAB_BUDGETS
     if not YNAB_BUDGETS:
         entity = DSCLIENT.get(DSCLIENT.key("budget", "budgets"))
@@ -1189,15 +1190,12 @@ def cron():
                     changed = True
         if changed or not found:
             to_process.append(a['id'])
+        elif now.minute in [0, 15, 30, 45]:
+            # Process all every 15 minutes anyway as automated imports do not
+            # trigger an update to last_modified_on.
+            to_process.append(a['id'])
 
-    YNAB_BUDGETS = budgets
-    print(to_process)
-    if to_process:
-        entity = datastore.Entity(DSCLIENT.key("budget", "budgets"),
-                                  exclude_from_indexes=["data"])
-        entity["data"] = json.dumps(YNAB_BUDGETS)
-        DSCLIENT.put(entity)
-
+    print("Updating:", to_process)
     triggers = []
     for budget in to_process:
 
@@ -1301,6 +1299,13 @@ def cron():
                                               len(entity["month_categories"]) +
                                               len(entity["payees"]) +
                                               len(entity["transactions"])))
+        DSCLIENT.put(entity)
+
+    if to_process:
+        YNAB_BUDGETS = budgets
+        entity = datastore.Entity(DSCLIENT.key("budget", "budgets"),
+                                  exclude_from_indexes=["data"])
+        entity["data"] = json.dumps(YNAB_BUDGETS)
         DSCLIENT.put(entity)
 
     if triggers:
@@ -1525,6 +1530,11 @@ def process_month_categories(old, categories, data, first_month, curfmt,
             elif not item["deleted"]:
                 print("Error: group not found: "+item["category_group_id"])
 
+            if item["goal_target"] is None:
+                goal_target = ""
+            else:
+                goal_target = convert_amount(item["goal_target"], curfmt)
+
             if not item["deleted"]:
                 change = {
                     "category_id": item["id"],
@@ -1540,7 +1550,7 @@ def process_month_categories(old, categories, data, first_month, curfmt,
                     "balance": convert_amount(item["balance"], curfmt),
                     "goal_type": item["goal_type"],
                     "goal_creation_month": item["goal_creation_month"],
-                    "goal_target": convert_amount(item["goal_target"], curfmt),
+                    "goal_target": goal_target,
                     "goal_target_month": item["goal_target_month"],
                     "goal_percentage_complete": \
                         item["goal_percentage_complete"],
