@@ -313,6 +313,10 @@ def ifttt_create_action(default):
 
     r = requests.get(YNAB_BASE + "/budgets/{}/accounts".format(budget), \
         headers={"Authorization": "Bearer {}".format(get_ynab_key())})
+    if "data" not in r.json():
+        print("[create_action] ERROR: retrieving accounts: ", r.text)
+        return "", 500
+
     results = r.json()["data"]["accounts"]
     account_id = None
     for a in results:
@@ -454,6 +458,10 @@ def ifttt_adjust_balance_action(default):
 
     r = requests.get(YNAB_BASE + "/budgets/{}/accounts".format(budget), \
         headers={"Authorization": "Bearer {}".format(get_ynab_key())})
+    if "data" not in r.json():
+        print("[adjust_balance_action] ERROR: retrieving accounts: ", r.text)
+        return "", 500
+
     results = r.json()["data"]["accounts"]
     account_id = None
     for a in results:
