@@ -358,7 +358,7 @@ def ifttt_create_action(default):
                                        "message": "Invalid date"}]}), 400
 
     try:
-        amount = int(float(fields["amount"])*1000)
+        amount = int(round(float(fields["amount"])*1000))
     except:
         print("[create_action] ERROR: invalid amount: "+fields["amount"])
         return json.dumps({"errors": [{"status": "SKIP",
@@ -505,7 +505,7 @@ def ifttt_adjust_balance_action(default):
                                        "message": "Invalid date"}]}), 400
 
     try:
-        new_balance = int(float(fields["new_balance"])*1000)
+        new_balance = int(round(float(fields["new_balance"])*1000))
         amount = new_balance - old_balance
     except:
         print("[adjust_balance_action] ERROR: invalid amount: "+\
