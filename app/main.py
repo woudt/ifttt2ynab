@@ -1447,6 +1447,11 @@ def process_categories(old, data, groupdata, curfmt, knowledge, first,
                 change_type = "new"
             result["data"][item["id"]] = [item["name"], group, fieldhash]
 
+        if item["goal_target"] is None:
+            goal_target = ""
+        else:
+            goal_target = convert_amount(item["goal_target"], curfmt)
+
         if not first and change_type is not None:
             change = {
                 "category_id": item["id"],
@@ -1461,7 +1466,7 @@ def process_categories(old, data, groupdata, curfmt, knowledge, first,
                 "balance": convert_amount(item["balance"], curfmt),
                 "goal_type": item["goal_type"],
                 "goal_creation_month": item["goal_creation_month"],
-                "goal_target": convert_amount(item["goal_target"], curfmt),
+                "goal_target": goal_target,
                 "goal_target_month": item["goal_target_month"],
                 "goal_percentage_complete": item["goal_percentage_complete"],
                 "meta": {
